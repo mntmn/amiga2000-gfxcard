@@ -1,0 +1,57 @@
+# vga.lpc  
+#   The constraints in this file were created simply to be viewed.  
+#   If you wish to use these constraints, please copy them into your  
+#   project's constraint file. If you do not have a project constraints  
+#   file yet, please use the "Project->New Source" menu to create one.
+
+
+
+#pin2ucf - Wed Oct 14 23:37:41 2015
+#The following constraints were newly added
+NET "blue" LOC = P118;
+NET "C9" LOC = P124;
+NET "SDRAM_ADDR<10>" LOC = P141;
+NET "SDRAM_ADDR<11>" LOC = P35;
+NET "SDRAM_BA<0>" LOC = P143;
+NET "SDRAM_ADDR<12>" LOC = P34;
+NET "LED1" LOC = P112;
+NET "SDRAM_BA<1>" LOC = P142;
+NET "SDRAM_nRAS" LOC = P2;
+NET "SDRAM_nCAS" LOC = P5;
+NET "hsync" LOC = P115;
+NET "SDRAM_DQM<0>" LOC = P7;
+NET "SDRAM_DQM<1>" LOC = P17;
+NET "SDRAM_CS" LOC = P1;
+NET "SDRAM_ADDR<0>" LOC = P140;
+NET "SDRAM_ADDR<1>" LOC = P139;
+NET "SDRAM_DATA<10>" LOC = P23;
+NET "vsync" LOC = P114;
+NET "green" LOC = P117;
+NET "SDRAM_ADDR<2>" LOC = P138;
+NET "SDRAM_DATA<11>" LOC = P24;
+NET "SDRAM_ADDR<3>" LOC = P137;
+NET "SDRAM_DATA<12>" LOC = P26;
+NET "SDRAM_nWE" LOC = P6;
+NET "SDRAM_ADDR<4>" LOC = P46;
+NET "SDRAM_DATA<0>" LOC = P9;
+NET "SDRAM_DATA<13>" LOC = P27;
+NET "SDRAM_ADDR<5>" LOC = P45;
+NET "SDRAM_DATA<1>" LOC = P10;
+NET "SDRAM_DATA<14>" LOC = P29;
+NET "SDRAM_ADDR<6>" LOC = P44;
+NET "SDRAM_DATA<2>" LOC = P11;
+NET "SDRAM_DATA<15>" LOC = P30;
+NET "SDRAM_ADDR<7>" LOC = P43;
+NET "SDRAM_DATA<3>" LOC = P12;
+NET "SDRAM_ADDR<8>" LOC = P41;
+NET "SDRAM_DATA<4>" LOC = P14;
+NET "SDRAM_CKE" LOC = P33;
+NET "SDRAM_ADDR<9>" LOC = P40;
+NET "SDRAM_DATA<5>" LOC = P15;
+NET "SDRAM_DATA<6>" LOC = P16;
+NET "SDRAM_CLK" LOC = P32;
+NET "SDRAM_DATA<7>" LOC = P8;
+NET "red" LOC = P116;
+NET "SDRAM_DATA<8>" LOC = P21;
+NET "CLK_IN1" LOC = P94;
+NET "SDRAM_DATA<9>" LOC = P22;
