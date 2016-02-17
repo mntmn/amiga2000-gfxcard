@@ -1,5 +1,6 @@
 *.zip
 *.bak
+_saved*
 va2000-pcb-export
 gerber
 pdf

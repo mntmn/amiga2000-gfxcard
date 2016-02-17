@@ -1,3 +1,7 @@
 EESchema-DOCLIB  Version 2.0
 #
+$CMP LSF0108
+K Voltage Level Translator TXS0108 ADG3300 MAX3002 TXB0108
+$ENDCMP
+#
 #End Doc Library
