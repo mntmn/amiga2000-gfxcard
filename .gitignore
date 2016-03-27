@@ -91,3 +91,12 @@ xst/
 _ngo/
 _xmsgs/
 
+z2-minispartan/ipcore_dir
+z2-minispartan/_ngo
+z2-minispartan/planAhead*
+z2-minispartan/xlnx*
+z2-minispartan/_xmsgs*
+z2-minispartan/_ngo
+z2-minispartan/xst
+
+report.txt

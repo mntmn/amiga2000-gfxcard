@@ -1,0 +1,109 @@
+P1 E (top)
+
+1 -    3v3
+2 A15  E1
+3 A14  E3
+4 A13  E5
+5 -    GND
+6 A2   E7
+7 A6   E9
+8 A5   E11
+
+P2 E (bottom)
+
+1 -      GND
+2 /BERR  E0
+3 /RST   E2
+4 E7M    E4
+5 -      3v3
+6 A23    E6
+7 A22    E8
+8 A17    E10
+
+
+P4 A (top)
+
+1 D3   A1
+2 D5   A3
+3 D6   A5
+4 -    3v3
+5 D8   A7
+6 D9   A9
+7 D10  A11
+8 -    GND
+
+P6 A (bottom)
+
+1 D1   A0
+2 D0   A2
+3 D11  A4
+4 -    GND
+5 D13  A6
+6 D14  A8
+7 D15  A10
+8 -    3v3
+
+P5 F (top)
+
+1 -     3v3
+2 A11   F1
+3 A10   F3
+4 A9    F5
+5 -     GND
+6 A7    F7
+7 A3    F9
+8 A4    F11
+
+P3 F (bottom)
+
+1 -     GND
+2 /UDS  F0
+3 /LDS  F2
+4 READ  F4
+5 -     3v3
+6 A20   F6
+7 A19   F8
+8 A18   F10
+
+P14 B (top)
+
+1 /AS     B1
+2 A21     B3
+3 A12     B5
+4 -       3V3
+5 A8      B7
+6 /CFGIN  B9
+7 DOE     B11
+8 -       GND
+
+P13 B (bottom)
+
+1 D2      B0
+2 D12     B2
+3 D4      B4
+4 -       GND
+5 D7      B6
+6 A16     B8
+7 A1      B10
+8 -       3V3
+
+P16 (out) D
+
+1 /CFGOUT
+2 /SLAVEn
+3 DIR
+
+
+--------------
+vga test
+--------------
+
+PORT C
+
+C1  R
+C3  G
+C5  B
+C0  Vsync
+C1  Hsync
+C4  -
+GND GND
