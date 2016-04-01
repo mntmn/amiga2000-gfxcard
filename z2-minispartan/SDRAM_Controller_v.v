@@ -44,9 +44,10 @@ module SDRAM_Controller_v (
    /// These need to be checked out
    //////////////////////////////////
    parameter sdram_column_bits    = 9;     // 
-   parameter sdram_address_width  = 22;    // zzz
+   parameter sdram_row_bits = 13;
+   parameter sdram_address_width  = 24;    // zzz
    parameter sdram_startup_cycles = 10100; // -- 100us, plus a little more, @ 100MHz
-   parameter cycles_per_refresh   = 1524;  // (64000*100)/4196-1 Cacled as  (64ms @ 100MHz)/ 4196 rose
+   parameter cycles_per_refresh   = 780; //1524;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
    
    input  clk;
    input  reset;
@@ -134,6 +135,7 @@ module SDRAM_Controller_v (
    parameter s_open_in_2 = 5'b01000, s_open_in_1 = 5'b01001, s_write_1   = 5'b01010, s_write_2   = 5'b01011;
    parameter s_write_3   = 5'b01100, s_read_1    = 5'b01101, s_read_2    = 5'b01110, s_read_3    = 5'b01111;
    parameter s_read_4    = 5'b10000, s_precharge = 5'b10001;
+   parameter s_write_1b = 5'b10010;
    reg [4:0] state = s_startup;
    
    // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
@@ -153,13 +155,13 @@ module SDRAM_Controller_v (
 
    // shift register to hold the DQM bits
    parameter dqm_sr_high = 3;
-   reg [dqm_sr_high:0] dqm_sr = 4'b0000; // an extra two bits in case CAS=3
+   reg [dqm_sr_high:0] dqm_sr = 4'b1111; // an extra two bits in case CAS=3
    
    // signals to hold the requested transaction before it is completed
    reg save_wr                  = 1'b0; 
-   reg [12:0] save_row          = 13'b0000000000000;
+   reg [sdram_row_bits-1:0] save_row          = 13'b0000000000000;
    reg [1:0]  save_bank         = 2'b00;
-   reg [12:0] save_col          = 13'b0000000000000;
+   reg [sdram_column_bits-1:0] save_col          = 13'b0000000000000;
    reg [31:0] save_data_in      = 32'b00000000000000000000000000000000;
    reg [3:0]  save_byte_enable  = 3'b0000;
    
@@ -176,13 +178,15 @@ module SDRAM_Controller_v (
    reg [data_ready_delay_high:0] data_ready_delay;
    // reg [3:0] data_ready_delay; // (for < 60Mhz)
    
+   // 9 10 11 12 13 14 15 16 17 18 29 20 21
+   
    // bit indexes used when splitting the address into row/colum/bank.
    parameter start_of_col  = 0;
    parameter end_of_col    = sdram_column_bits-1;
+   parameter start_of_row  = sdram_column_bits; // 9
+   parameter end_of_row    = sdram_column_bits+sdram_row_bits-1; // 9+13-1 = 21
    parameter start_of_bank = sdram_address_width-2;
    parameter end_of_bank   = sdram_address_width-1;
-   parameter start_of_row  = sdram_column_bits;
-   parameter end_of_row    = sdram_address_width-3;
    parameter prefresh_cmd  = 10;
 
 
@@ -329,7 +333,7 @@ always  @ (posedge clk )
                end
 
                //------------------------------------------------------
-               //-- if startup is coomplete then go into idle mode,
+               //-- if startup is complete then go into idle mode,
                //-- get prepared to accept a new command, and schedule
                //-- the first refresh cycle
                //------------------------------------------------------
@@ -436,7 +440,7 @@ always  @ (posedge clk )
                      got_transaction <= 1'b0;
                   end
                   else
-                     state <= s_open_in_2; // we have to wait for the read data to come back before we swutch the bus into HiZ
+                     state <= s_open_in_2; // we have to wait for the read data to come back before we switch the bus into HiZ
                end
             end
          //------------------------------------------------------------------
@@ -452,7 +456,7 @@ always  @ (posedge clk )
                dqm_sr[1:0]               <= ~ save_byte_enable[3:2];    
                iob_data                  <= save_data_in[15:0];
                iob_data_next             <= save_data_in[31:16];
-            end   
+            end
          s_write_2: begin
                state           <= s_write_3;
                iob_data        <= iob_data_next;

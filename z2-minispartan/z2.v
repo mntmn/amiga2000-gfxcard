@@ -119,14 +119,14 @@ clk_wiz_v3_6 DCM(
 
 wire sdram_reset;
 reg  ram_enable;
-reg  [20:0] ram_addr;
+reg  [23:0] ram_addr;
 wire [31:0] ram_data_out;
 wire data_out_ready;
 reg  [31:0] ram_data_in;
 reg  ram_write;
 reg  [3:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:799]; // 640x16bit packed as 320x32bit
-reg  [10:0] fetch_x;
+reg  [15:0] ram_data_buffer [0:1023]; // 640x16bit packed as 320x32bit
+reg  [10:0] fetch_x = 0;
 reg  fetching;
 
 
@@ -194,13 +194,13 @@ reg [11:0] counter_y;
 //reg [11:0] counter_frame;
 
 parameter h_rez        = 1280;
-parameter h_sync_start = 1280+72;
-parameter h_sync_end   = 1280+80;
+parameter h_sync_start = h_rez+72;
+parameter h_sync_end   = h_rez+80;
 parameter h_max        = 1647;
 
 parameter v_rez        = 720;
-parameter v_sync_start = 720+3;
-parameter v_sync_end   = 720+3+5;
+parameter v_sync_start = v_rez+3;
+parameter v_sync_end   = v_rez+3+5;
 parameter v_max        = 749;
 
 reg [23:0] zaddr;
@@ -208,42 +208,67 @@ reg [15:0] data;
 reg [15:0] data_in;
 reg dataout;
 
-assign zDIR = ~dataout;
-assign znSLAVEN = ~dataout;
-assign zD0  = dataout?data[0]:1'bz;
-assign zD1  = dataout?data[1]:1'bz;
-assign zD2  = dataout?data[2]:1'bz;
-assign zD3  = dataout?data[3]:1'bz;
-assign zD4  = dataout?data[4]:1'bz;
-assign zD5  = dataout?data[5]:1'bz;
-assign zD6  = dataout?data[6]:1'bz;
-assign zD7  = dataout?data[7]:1'bz;
-assign zD8  = dataout?data[8]:1'bz;
-assign zD9  = dataout?data[9]:1'bz;
-assign zD10 = dataout?data[10]:1'bz;
-assign zD11 = dataout?data[11]:1'bz;
-assign zD12 = dataout?data[12]:1'bz;
-assign zD13 = dataout?data[13]:1'bz;
-assign zD14 = dataout?data[14]:1'bz;
-assign zD15 = dataout?data[15]:1'bz;
+assign zDIR     = ~(zREAD);
+assign znSLAVEN = ~(dataout & zDOE & zREAD & !znAS && (zaddr>=ram_low && zaddr<ram_high));
+assign zD0  = zREAD?data[0]:1'bz;
+assign zD1  = zREAD?data[1]:1'bz;
+assign zD2  = zREAD?data[2]:1'bz;
+assign zD3  = zREAD?data[3]:1'bz;
+assign zD4  = zREAD?data[4]:1'bz;
+assign zD5  = zREAD?data[5]:1'bz;
+assign zD6  = zREAD?data[6]:1'bz;
+assign zD7  = zREAD?data[7]:1'bz;
+assign zD8  = zREAD?data[8]:1'bz;
+assign zD9  = zREAD?data[9]:1'bz;
+assign zD10 = zREAD?data[10]:1'bz;
+assign zD11 = zREAD?data[11]:1'bz;
+assign zD12 = zREAD?data[12]:1'bz;
+assign zD13 = zREAD?data[13]:1'bz;
+assign zD14 = zREAD?data[14]:1'bz;
+assign zD15 = zREAD?data[15]:1'bz;
 
-reg [31:0] last_addr;
-reg [15:0] last_data;
+reg [23:0] last_addr = 0;
+reg [15:0] last_data = 0;
+reg [1:0] last_ds = 0;
 
-reg last_uds = 0;
+/*reg last_uds = 0;
 reg last_lds = 0;
+reg last_as = 0;
+reg last_read = 0;*/
 reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 32;
+parameter max_fill = 512;
 
 reg [25:0] writeq_addr [0:max_fill-1]; // 25=uds 24=lds
 reg [15:0] writeq_data [0:max_fill-1];
-reg [8:0] writeq_fill;
-reg [8:0] writeq_drain;
+reg [10:0] writeq_fill;
+reg [10:0] writeq_drain;
+
+reg [3:0] zclk;
+assign z_rising = (zclk[0]==1 && zclk[1]==0) || (zclk[3]==1 && zclk[2]==0);
+
+reg [3:0] state = 0;
+reg row_fetched = 0;
+parameter IDLE = 0;
+parameter WAIT_READ = 1;
+parameter WAIT_WRITE = 2;
+parameter WAIT_WRITE2 = 3;
+parameter WAIT_WRITE3 = 4;
+parameter WAIT_READ2 = 5;
+
+parameter ram_low = 'h200000;
+parameter ram_high = 'h340000;
 
 always @(posedge z_sample_clk) begin
+
+  // sync to zorro clock (z_rising)
+  zclk[0] <= znUDS;
+  zclk[1] <= zclk[0];
+  zclk[2] <= znLDS;
+  zclk[3] <= zclk[2];
+
   data_in[0] <= zD0;
   data_in[1] <= zD1;
   data_in[2] <= zD2;
@@ -286,103 +311,118 @@ always @(posedge z_sample_clk) begin
   zaddr[1] <= zA1;
   zaddr[0] <= 0;
   
-  ram_enable <= 1;
+  if (state == IDLE) begin
   
-  if (zREAD && !znAS && zaddr>='h200000 && zaddr<'h300000) begin
-    // read RAM
     ram_write <= 0;
-    ram_addr <= ((zaddr&'hfffff)<<1);
-    dataout <= zDOE;
-    host_reading <= 1;
-    data <= ram_data_out[15:0];
-    write_clocked <= 0;
-  end else if (zREAD && !znAS && zDOE && zaddr=='he80000) begin
-    // read iospace
-    host_reading <= 0;
-    dataout <= 1;
-    data <= max_fill-writeq_fill;
-    write_clocked <= 0;
-  end else if (!zREAD && !znAS && zDOE && zaddr>='h200000 && zaddr<'h300000) begin
-    // write RAM
-    host_reading <= 0;
     dataout <= 0;
-    
-    if (!write_clocked) begin
-      writeq_addr[writeq_fill][23:0] <= zaddr;
-      writeq_addr[writeq_fill][24]   <= ~znLDS;
-      writeq_addr[writeq_fill][25]   <= ~znUDS;
-      writeq_data[writeq_fill]       <= data_in;
-      
-      writeq_fill <= writeq_fill+1;
-      write_clocked <= 1;
-    end
-  end else begin
-    host_reading <= 0;
-    dataout <= 0;
-    write_clocked <= 0;
-    byte_ena_clocked <= 0;
-  end
-
-
-  if (counter_x == 0 && counter_y<600) begin
-    fetch_x <= 0;
-    fetching <= 1;
-    ram_write <= 0;
-    ram_byte_enable <= 'b1111;
-    ram_addr  <= ((counter_y << 10));
-  end else begin
-    if (fetching && !host_reading) begin
-      // read window
-      
-      ram_data_buffer[fetch_x] <= ram_data_out;
-      ram_byte_enable <= 'b1111;
+  
+    if (zREAD && !znAS && zaddr>=ram_low && zaddr<ram_high) begin
+      // read RAM
+      ram_addr <= ((zaddr&'h1fffff)<<1);
+      dataout <= 1;
+      data <= ram_data_out[15:0];
+      ram_enable <= 1;
       ram_write <= 0;
+      if (zDOE) state <= WAIT_READ;
+    
+    end else if (zREAD && !znAS && zaddr=='he80000) begin
+      // read iospace
+      dataout <= 1;
+      data <= max_fill-writeq_fill;
       
-      if (data_out_ready) begin
-        ram_addr  <= ((counter_y << 10) | fetch_x)<<2;
+    end else if (!zREAD && z_rising && zaddr>=ram_low && zaddr<ram_high) begin
+      // write RAM
+        dataout <= 0;
         
-        fetch_x <= fetch_x + 1;
-        if (fetch_x > 799) begin
-          fetching <= 0;
-          fetch_x  <= 0;
-        end
-      end
-    end else begin
-      // write window
-      if (!fetching && !host_reading) begin
-        if (cmd_ready==1) begin
-          if (writeq_fill>writeq_drain) begin
-            if (!byte_ena_clocked) begin
-              if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
-                ram_byte_enable <= 'b1010; // UDS
-              else if (writeq_addr[writeq_drain][24] && !writeq_addr[writeq_drain][25])
-                ram_byte_enable <= 'b0101; // LDS
-              else
-                ram_byte_enable <= 'b1111;
-              //                       ^^-- currently visible bytes
-              
-              ram_data_in <= 32'b0|(writeq_data[writeq_drain]);
-              ram_addr    <= 20'b0|(((writeq_addr[writeq_drain][23:0])&'hffffe)<<1); // store 16 bit in 32 bit cell      
-              ram_write   <= 1;
-              
-              last_addr <= writeq_addr[writeq_drain][23:0]; //zaddr;
-              last_data <= writeq_data[writeq_drain]; //data_in;
-              last_lds  <= writeq_addr[writeq_drain][24]; //~znLDS;
-              last_uds  <= writeq_addr[writeq_drain][25]; //~znUDS;
-              
-              writeq_drain <= writeq_drain + 1;
-            end
-          end
-        end
+        //if (last_addr!=zaddr || last_data!=data_in || last_ds!={znLDS,znUDS}) begin
+          last_addr <= zaddr;
+          last_data <= data_in;
+          last_ds <= {znLDS,znUDS};
+          writeq_addr[writeq_fill][23:0] <= zaddr;
+          writeq_addr[writeq_fill][24]   <= ~znLDS;
+          writeq_addr[writeq_fill][25]   <= ~znUDS;
+          writeq_data[writeq_fill]       <= data_in;
+          
+          if (writeq_fill<max_fill-1)
+            writeq_fill <= writeq_fill+1;
+          else
+            writeq_fill <= 0;
+        //end
+      // FIXME end signal lose data
+    end else if (!row_fetched && !fetching && counter_y<600) begin
+      fetching <= 1;
+      fetch_x <= 0;
+      ram_byte_enable <= 'b1111;
+      ram_addr  <= ((counter_y << 10));
+      ram_write <= 0;
+      ram_enable <= 1;
+    end
+  
+  end else if (state == WAIT_READ) begin
+    dataout <= 1;
+    data <= ram_data_out[15:0];
+    ram_enable <= 0;
+    if (!zDOE || znAS) state <= IDLE;
+    
+  end else if (state == WAIT_WRITE) begin
+    ram_enable <= 0;
+    
+    if (writeq_drain<max_fill-1)
+      writeq_drain <= writeq_drain+1;
+    else
+      writeq_drain <= 0;
+    
+    if (cmd_ready) begin
+      state <= IDLE;
+    end
+  end
+  
+  if (fetching && state == IDLE) begin
+    // read window
+    
+    ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+    ram_byte_enable <= 'b1111;
+    ram_write <= 0;
+    ram_enable <= 1;
+    
+    if (data_out_ready) begin
+      ram_addr  <= ((counter_y << 10) | fetch_x)<<2;
+      
+      fetch_x <= fetch_x + 1;
+      if (fetch_x > 1023) begin
+        fetching <= 0;
+        fetch_x  <= 0;
+        row_fetched <= 1;
+        ram_enable <= 0;
       end
     end
   end
+  
+  if (!fetching && state == IDLE && cmd_ready && writeq_fill!=writeq_drain) begin
+    // write window
+    if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
+      ram_byte_enable <= 'b1010; // UDS
+    else if (writeq_addr[writeq_drain][24] && !writeq_addr[writeq_drain][25])
+      ram_byte_enable <= 'b0101; // LDS
+    else
+      ram_byte_enable <= 'b1111;
+    //                       ^^-- currently visible bytes
     
-  if (writeq_drain >= max_fill) begin
-    writeq_drain <= 0;
-    writeq_fill <= 0;
+    ram_data_in <= (writeq_data[writeq_drain]<<16)|(writeq_data[writeq_drain]);
+    ram_addr    <= (((writeq_addr[writeq_drain][23:0])&'h1ffffe)<<1); // store 16 bit in 32 bit cell      
+    ram_write   <= 1;
+    ram_enable  <= 1;
+    
+    /*last_addr <= writeq_addr[writeq_drain][23:0]; //zaddr;
+    last_data <= writeq_data[writeq_drain]; //data_in;
+    last_lds  <= writeq_addr[writeq_drain][24]; //~znLDS;
+    last_uds  <= writeq_addr[writeq_drain][25]; //~znUDS;*/
+    
+    state <= WAIT_WRITE;
   end
   
+  if (counter_x==0)
+    row_fetched <= 0;
 end
 
 /*assign vgaHSync = ~hs;
@@ -408,6 +448,11 @@ always @(posedge vga_clk) begin
     dvi_hsync <= 1;
   else
     dvi_hsync <= 0;
+    
+  if (counter_y>=v_sync_start && counter_y<v_sync_end)
+    dvi_vsync <= 1;
+  else
+    dvi_vsync <= 0;
       
   if (counter_x<h_rez && counter_y<v_rez) begin
     /*red_p <= 'hff;
@@ -442,143 +487,151 @@ always @(posedge vga_clk) begin
   LEDS <= 0;
 	//rgb <= 0;
   
-  /*if (dvi_blank)
+  if (dvi_blank)
 	    rgb <= 0;
 	  else
-      rgb <= ram_data_buffer[counter_x];
+      //rgb <= ram_data_buffer[counter_x];
         
-      if (counter_y>500) begin
+      if (counter_y>600) begin
         if (counter_x<210)
           rgb <= 0;
         else if (counter_x<220)
-          rgb <= last_addr[23]?'hff:0;
+          rgb <= last_addr[23]?16'hff:16'h0;
         else if (counter_x<230)
-          rgb <= last_addr[22]?'hff:0;
+          rgb <= last_addr[22]?16'hff:16'h0;
         else if (counter_x<240)
-          rgb <= last_addr[21]?'hff:0;
+          rgb <= last_addr[21]?16'hff:16'h0;
         else if (counter_x<250)
-          rgb <= last_addr[20]?'hff:0;
+          rgb <= last_addr[20]?16'hff:16'h0;
         else if (counter_x<260)
-          rgb <= last_addr[19]?'hff:0;
+          rgb <= last_addr[19]?16'hff:16'h0;
         else if (counter_x<270)
-          rgb <= last_addr[18]?'hff:0;
+          rgb <= last_addr[18]?16'hff:16'h0;
         else if (counter_x<280)
-          rgb <= last_addr[17]?'hff:0;
+          rgb <= last_addr[17]?16'hff:16'h0;
         else if (counter_x<290)
-          rgb <= last_addr[16]?'hff:0;
+          rgb <= last_addr[16]?16'hff:16'h0;
         else if (counter_x<300)
-          rgb <= last_addr[15]?'hff:0;
+          rgb <= last_addr[15]?16'hff:16'h0;
         else if (counter_x<310)
-          rgb <= last_addr[14]?'hff:0;
+          rgb <= last_addr[14]?16'hff:16'h0;
         else if (counter_x<320)
-          rgb <= last_addr[13]?'hff:0;
+          rgb <= last_addr[13]?16'hff:16'h0;
         else if (counter_x<330)
-          rgb <= last_addr[12]?'hff:0;
+          rgb <= last_addr[12]?16'hff:16'h0;
         else if (counter_x<340)
-          rgb <= last_addr[11]?'hff:0;
+          rgb <= last_addr[11]?16'hff:16'h0;
         else if (counter_x<350)
-          rgb <= last_addr[10]?'hff:0;
+          rgb <= last_addr[10]?16'hff:16'h0;
         else if (counter_x<360)
-          rgb <= last_addr[9]?'hff:0;
+          rgb <= last_addr[9]?16'hff:16'h0;
         else if (counter_x<370)
-          rgb <= last_addr[8]?'hff:0;
+          rgb <= last_addr[8]?16'hff:16'h0;
         else if (counter_x<380)
-          rgb <= last_addr[7]?'hff:0;
+          rgb <= last_addr[7]?16'hff:16'h0;
         else if (counter_x<390)
-          rgb <= last_addr[6]?'hff:0;
+          rgb <= last_addr[6]?16'hff:16'h0;
         else if (counter_x<400)
-          rgb <= last_addr[5]?'hff:0;
+          rgb <= last_addr[5]?16'hff:16'h0;
         else if (counter_x<410)
-          rgb <= last_addr[4]?'hff:0;
+          rgb <= last_addr[4]?16'hff:16'h0;
         else if (counter_x<420)
-          rgb <= last_addr[3]?'hff:0;
+          rgb <= last_addr[3]?16'hff:16'h0;
         else if (counter_x<430)
-          rgb <= last_addr[2]?'hff:0;
+          rgb <= last_addr[2]?16'hff:16'h0;
         else if (counter_x<440)
-          rgb <= last_addr[1]?'hff:0;
+          rgb <= last_addr[1]?16'hff:16'h0;
         else if (counter_x<450)
-          rgb <= last_addr[0]?'hff:0;
+          rgb <= last_addr[0]?16'hff:16'h0;
         else if (counter_x<490)
-          rgb <= 0;
-        else if (counter_x<500)
-          rgb <= last_uds?'hf00f:'hffff;
+          rgb <= 16'h0;
+        /*else if (counter_x<500)
+          rgb <= last_uds?16'hf00f:16'hffff;
         else if (counter_x<510)
-          rgb <= last_lds?'hf00f:'hffff;
+          rgb <= last_lds?16'hf00f:16'hffff;*/
           
         else if (counter_x<520)
-          rgb <= last_data[15]?'hffff:'h00ff;
+          rgb <= last_data[15]?16'hffff:16'h00ff;
         else if (counter_x<521)
           rgb <= 0;
         else if (counter_x<530)
-          rgb <= last_data[14]?'hffff:'h00ff;
+          rgb <= last_data[14]?16'hffff:16'h00ff;
         else if (counter_x<531)
           rgb <= 0;
         else if (counter_x<540)
-          rgb <= last_data[13]?'hffff:'h00ff;
+          rgb <= last_data[13]?16'hffff:16'h00ff;
         else if (counter_x<541)
           rgb <= 0;
         else if (counter_x<550)
-          rgb <= last_data[12]?'hffff:'h00ff;
+          rgb <= last_data[12]?16'hffff:16'h00ff;
         else if (counter_x<551)
           rgb <= 0;
         else if (counter_x<560)
-          rgb <= last_data[11]?'hffff:'h00ff;
+          rgb <= last_data[11]?16'hffff:16'h00ff;
         else if (counter_x<561)
           rgb <= 0;
         else if (counter_x<570)
-          rgb <= last_data[10]?'hffff:'h00ff;
+          rgb <= last_data[10]?16'hffff:16'h00ff;
         else if (counter_x<571)
           rgb <= 0;
         else if (counter_x<580)
-          rgb <= last_data[9]?'hffff:'h00ff;
+          rgb <= last_data[9]?16'hffff:16'h00ff;
         else if (counter_x<581)
           rgb <= 0;
         else if (counter_x<590)
-          rgb <= last_data[8]?'hffff:'h00ff;
+          rgb <= last_data[8]?16'hffff:16'h00ff;
         else if (counter_x<591)
           rgb <= 0;
         else if (counter_x<600)
-          rgb <= last_data[7]?'hffff:'h00ff;
+          rgb <= last_data[7]?16'hffff:16'h00ff;
         else if (counter_x<601)
           rgb <= 0;
         else if (counter_x<610)
-          rgb <= last_data[6]?'hffff:'h00ff;
+          rgb <= last_data[6]?16'hffff:16'h00ff;
         else if (counter_x<611)
           rgb <= 0;
         else if (counter_x<620)
-          rgb <= last_data[5]?'hffff:'h00ff;
+          rgb <= last_data[5]?16'hffff:16'h00ff;
         else if (counter_x<621)
           rgb <= 0;
         else if (counter_x<630)
-          rgb <= last_data[4]?'hffff:'h00ff;
+          rgb <= last_data[4]?16'hffff:16'h00ff;
         else if (counter_x<631)
           rgb <= 0;
         else if (counter_x<640)
-          rgb <= last_data[3]?'hffff:'h00ff;
+          rgb <= last_data[3]?16'hffff:16'h00ff;
         else if (counter_x<641)
           rgb <= 0;
         else if (counter_x<650)
-          rgb <= last_data[2]?'hffff:'h00ff;
+          rgb <= last_data[2]?16'hffff:16'h00ff;
         else if (counter_x<651)
           rgb <= 0;
         else if (counter_x<660)
-          rgb <= last_data[1]?'hffff:'h00ff;
+          rgb <= last_data[1]?16'hffff:16'h00ff;
         else if (counter_x<661)
           rgb <= 0;
         else if (counter_x<670)
-          rgb <= last_data[0]?'hffff:'h00ff;
+          rgb <= last_data[0]?16'hffff:16'h00ff;
         else if (counter_x<700)
           rgb <= 0;
-        else if (counter_x<732) begin
+        /*else if (counter_x<710)
+          rgb <= last_as?16'hf0ff:16'hffff;
+        else if (counter_x<720)
+          rgb <= last_read?16'hf0ff:16'hffff;*/
+        else if (counter_x<(700+max_fill)) begin
           if (counter_y<550) 
-            rgb <= writeq_fill>(counter_x-700)?'hffff:'h0000;        
+            rgb <= writeq_fill>(counter_x-700)?16'hffff:16'h0000;        
           else
-            rgb <= writeq_drain>(counter_x-700)?'hffff:'h0000;
+            rgb <= writeq_drain>(counter_x-700)?16'hffff:16'h0000;
         end else 
           rgb <= 0;
         end
-      else 
-        rgb <= ram_data_buffer[counter_x];*/
+      else begin
+        if (counter_x>1023)
+          rgb <= 0;
+        else 
+          rgb <= ram_data_buffer[counter_x];
+      end
 
 end
 
