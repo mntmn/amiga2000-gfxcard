@@ -1,4 +1,4 @@
-`timescale 1ns / 1ps
+`timescale 1ns / 1ns
 //////////////////////////////////////////////////////////////////////////////////
 // Company: 
 // Engineer: 
@@ -19,7 +19,6 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 module z2(
-
 input CLK50,
 
 // zorro
@@ -36,48 +35,11 @@ input zDOE,
 input znAS,
 input znUDS,
 input znLDS,
-input zA1,
-input zA2,
-input zA3,
-input zA4,
-input zA5,
-input zA6,
-input zA7,
-input zA8,
-input zA9,
-input zA10,
-input zA11,
-input zA12,
-input zA13,
-input zA14,
-input zA15,
-input zA16,
-input zA17,
-input zA18,
-input zA19,
-input zA20,
-input zA21,
-input zA22,
-input zA23,
+input [23:0] zA,
 
 // data bus
 output zDIR,
-inout zD0,
-inout zD1,
-inout zD2,
-inout zD3,
-inout zD4,
-inout zD5,
-inout zD6,
-inout zD7,
-inout zD8,
-inout zD9,
-inout zD10,
-inout zD11,
-inout zD12,
-inout zD13,
-inout zD14,
-inout zD15,
+inout [15:0] zD,
 
 // vga debug out
 /*output vgaR,
@@ -118,16 +80,16 @@ clk_wiz_v3_6 DCM(
 );*/
 
 wire sdram_reset;
-reg  ram_enable;
-reg  [23:0] ram_addr;
+reg  ram_enable = 0;
+reg  [23:0] ram_addr = 0;
 wire [31:0] ram_data_out;
 wire data_out_ready;
 reg  [31:0] ram_data_in;
-reg  ram_write;
+reg  ram_write = 0;
 reg  [3:0]  ram_byte_enable;
 reg  [15:0] ram_data_buffer [0:1023]; // 640x16bit packed as 320x32bit
 reg  [10:0] fetch_x = 0;
-reg  fetching;
+reg  fetching = 0;
 
 
 // SDRAM
@@ -137,7 +99,7 @@ SDRAM_Controller_v sdram(
   // command and write port
   .cmd_ready(cmd_ready), 
   .cmd_enable(ram_enable), 
-  .cmd_wr(ram_write), 
+  .cmd_wr(ram_write),
   .cmd_byte_enable(ram_byte_enable), 
   .cmd_address(ram_addr), 
   .cmd_data_in(ram_data_in),
@@ -189,8 +151,8 @@ dvid_out dvid_out(
 assign sdram_reset = 0;
 
 // vga registers
-reg [11:0] counter_x;
-reg [11:0] counter_y;
+reg [11:0] counter_x = 0;
+reg [11:0] counter_y = 0;
 //reg [11:0] counter_frame;
 
 parameter h_rez        = 1280;
@@ -204,28 +166,14 @@ parameter v_sync_end   = v_rez+3+5;
 parameter v_max        = 749;
 
 reg [23:0] zaddr;
+reg [23:0] zaddr2;
 reg [15:0] data;
 reg [15:0] data_in;
-reg dataout;
+reg dataout = 0;
 
-assign zDIR     = ~(zREAD);
-assign znSLAVEN = ~(dataout & zDOE & zREAD & !znAS && (zaddr>=ram_low && zaddr<ram_high));
-assign zD0  = zREAD?data[0]:1'bz;
-assign zD1  = zREAD?data[1]:1'bz;
-assign zD2  = zREAD?data[2]:1'bz;
-assign zD3  = zREAD?data[3]:1'bz;
-assign zD4  = zREAD?data[4]:1'bz;
-assign zD5  = zREAD?data[5]:1'bz;
-assign zD6  = zREAD?data[6]:1'bz;
-assign zD7  = zREAD?data[7]:1'bz;
-assign zD8  = zREAD?data[8]:1'bz;
-assign zD9  = zREAD?data[9]:1'bz;
-assign zD10 = zREAD?data[10]:1'bz;
-assign zD11 = zREAD?data[11]:1'bz;
-assign zD12 = zREAD?data[12]:1'bz;
-assign zD13 = zREAD?data[13]:1'bz;
-assign zD14 = zREAD?data[14]:1'bz;
-assign zD15 = zREAD?data[15]:1'bz;
+assign zDIR     = !(dataout);
+assign znSLAVEN = !(dataout && zDOE && zREAD);
+assign zD  = (dataout) ? data : 16'bzzzz_zzzz_zzzz_zzzz;
 
 reg [23:0] last_addr = 0;
 reg [15:0] last_data = 0;
@@ -239,186 +187,248 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 512;
+parameter max_fill = 1024;
 
 reg [25:0] writeq_addr [0:max_fill-1]; // 25=uds 24=lds
 reg [15:0] writeq_data [0:max_fill-1];
-reg [10:0] writeq_fill;
-reg [10:0] writeq_drain;
+reg [12:0] writeq_fill = 0;
+reg [12:0] writeq_drain = 0;
 
-reg [3:0] zclk;
-assign z_rising = (zclk[0]==1 && zclk[1]==0) || (zclk[3]==1 && zclk[2]==0);
+reg [1:0] znAS_sync  = 2'b11;
+reg [2:0] znUDS_sync = 3'b000;
+reg [2:0] znLDS_sync = 3'b000;
+reg [1:0] zREAD_sync = 2'b00;
+reg [1:0] zDOE_sync = 2'b00;
+reg [1:0] zE7M_sync = 2'b00;
 
-reg [3:0] state = 0;
+reg [6:0] state = 0;
 reg row_fetched = 0;
 parameter IDLE = 0;
 parameter WAIT_READ = 1;
 parameter WAIT_WRITE = 2;
-parameter WAIT_WRITE2 = 3;
-parameter WAIT_WRITE3 = 4;
-parameter WAIT_READ2 = 5;
+parameter WAIT_READ_ROM = 4;
+parameter WAIT_WRITE2 = 8;
+parameter WAIT_READ2 = 16;
+parameter WAIT_READ3 = 32;
 
-parameter ram_low = 'h200000;
-parameter ram_high = 'h340000;
+parameter ram_low  = 24'h600000;
+parameter ram_high = 24'h740000;
+parameter rom_low  = 24'he80000;
+parameter rom_high = 24'he80100;
+
+parameter rec_depth = 16;
+
+reg [23:0] rec_addr [0:rec_depth-1];
+reg [15:0] rec_data [0:rec_depth-1];
+reg rec_as [0:rec_depth-1];
+reg rec_lds [0:rec_depth-1];
+reg rec_uds [0:rec_depth-1];
+reg rec_read [0:rec_depth-1];
+reg rec_doe [0:rec_depth-1];
+reg recording = 1;
+
+reg [6:0] rec_idx; // up to rec_depth
+reg [6:0] trigger_idx;
+reg read_fetched = 0;
 
 always @(posedge z_sample_clk) begin
 
-  // sync to zorro clock (z_rising)
-  zclk[0] <= znUDS;
-  zclk[1] <= zclk[0];
-  zclk[2] <= znLDS;
-  zclk[3] <= zclk[2];
+  // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
+  znUDS_sync  <= {znUDS_sync[1:0],znUDS};
+  znLDS_sync  <= {znLDS_sync[1:0],znLDS};
+  znAS_sync   <= {znAS_sync[0],znAS};
+  zREAD_sync  <= {zREAD_sync[0],zREAD};
+  zDOE_sync   <= {zDOE_sync[0],zDOE};
+  zE7M_sync   <= {zE7M_sync[0],zE7M};
+  
+  data_in <= zD;
+  zaddr <= zA;
+  
+  rec_addr[rec_idx] <= zaddr;
+  rec_data[rec_idx] <= data_in;
+  rec_as[rec_idx]   <= znAS_sync[1];
+  rec_lds[rec_idx]  <= znLDS_sync[1];
+  rec_uds[rec_idx]  <= znUDS_sync[1];
+  rec_read[rec_idx] <= zREAD_sync[1];
+  rec_doe[rec_idx]  <= zDOE_sync[1];
+  
+  if (rec_idx>=rec_depth-1) begin
+    if (recording)
+      rec_idx <= 0;
+  end else
+    rec_idx <= rec_idx+1;
 
-  data_in[0] <= zD0;
-  data_in[1] <= zD1;
-  data_in[2] <= zD2;
-  data_in[3] <= zD3;
-  data_in[4] <= zD4;
-  data_in[5] <= zD5;
-  data_in[6] <= zD6;
-  data_in[7] <= zD7;
-  data_in[8] <= zD8;
-  data_in[9] <= zD9;
-  data_in[10] <= zD10;
-  data_in[11] <= zD11;
-  data_in[12] <= zD12;
-  data_in[13] <= zD13;
-  data_in[14] <= zD14;
-  data_in[15] <= zD15;
-  
-  zaddr[23] <= zA23;
-  zaddr[22] <= zA22;
-  zaddr[21] <= zA21;
-  zaddr[20] <= zA20;
-  zaddr[19] <= zA19;
-  zaddr[18] <= zA18;
-  zaddr[17] <= zA17;
-  zaddr[16] <= zA16;
-  zaddr[15] <= zA15;
-  zaddr[14] <= zA14;
-  zaddr[13] <= zA13;
-  zaddr[12] <= zA12;
-  zaddr[11] <= zA11;
-  zaddr[10] <= zA10;
-  zaddr[9] <= zA9;
-  zaddr[8] <= zA8;
-  zaddr[7] <= zA7;
-  zaddr[6] <= zA6;
-  zaddr[5] <= zA5;
-  zaddr[4] <= zA4;
-  zaddr[3] <= zA3;
-  zaddr[2] <= zA2;
-  zaddr[1] <= zA1;
-  zaddr[0] <= 0;
-  
   if (state == IDLE) begin
-  
     ram_write <= 0;
-    dataout <= 0;
-  
-    if (zREAD && !znAS && zaddr>=ram_low && zaddr<ram_high) begin
-      // read RAM
-      ram_addr <= ((zaddr&'h1fffff)<<1);
-      dataout <= 1;
-      data <= ram_data_out[15:0];
-      ram_enable <= 1;
-      ram_write <= 0;
-      if (zDOE) state <= WAIT_READ;
+    ram_enable <= 0;
     
-    end else if (zREAD && !znAS && zaddr=='he80000) begin
-      // read iospace
-      dataout <= 1;
-      data <= max_fill-writeq_fill;
+    if (znAS_sync[1]==0) begin
+      // zorro gives us an address
       
-    end else if (!zREAD && z_rising && zaddr>=ram_low && zaddr<ram_high) begin
-      // write RAM
+      if (zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) begin
+        //recording <= 0;
+        //trigger_idx <= rec_idx;
+        // read RAM
         dataout <= 0;
+        read_fetched <= 0;
+        state <= WAIT_READ;
         
-        //if (last_addr!=zaddr || last_data!=data_in || last_ds!={znLDS,znUDS}) begin
-          last_addr <= zaddr;
-          last_data <= data_in;
-          last_ds <= {znLDS,znUDS};
-          writeq_addr[writeq_fill][23:0] <= zaddr;
-          writeq_addr[writeq_fill][24]   <= ~znLDS;
-          writeq_addr[writeq_fill][25]   <= ~znUDS;
-          writeq_data[writeq_fill]       <= data_in;
-          
-          if (writeq_fill<max_fill-1)
-            writeq_fill <= writeq_fill+1;
-          else
-            writeq_fill <= 0;
-        //end
-      // FIXME end signal lose data
+      end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN && zDOE_sync[1]) begin
+        // read iospace 'he80000 (ROM)
+        //recording <= 0;
+        //trigger_idx <= rec_idx;
+        dataout <= 1;
+        last_addr <= zaddr;
+        
+        case (zaddr & 'h0000ff)
+          'h000000: data <= 'b1100_0000_0000_0000; // zorro 2
+          'h000002: data <= 'b0111_0000_0000_0000; // 4mb, not linked
+          'h000004: data <= 'b0001_0000_0000_0000; // product number
+          'h000006: data <= 'b0111_0000_0000_0000; // (23)
+          'h000008: data <= 'b0100_0000_0000_0000; // flags
+          'h00000a: data <= 'b0000_0000_0000_0000; // sub size automatic
+          'h00000c: data <= 'b0000_0000_0000_0000; // reserved
+          'h00000e: data <= 'b0000_0000_0000_0000; // 
+          'h000010: data <= 'b0110_0000_0000_0000; // manufacturer high byte
+          'h000012: data <= 'b1101_0000_0000_0000; // 
+          'h000014: data <= 'b0110_0000_0000_0000; // manufacturer low byte
+          'h000016: data <= 'b1101_0000_0000_0000;
+          'h000018: data <= 'b0000_0000_0000_0000; // reserved
+          'h00001a: data <= 'b0000_0000_0000_0000; //
+          //'h000044: z_state <= Z_CONF_DONE;
+         
+          default: data <= 'b0000_0000_0000_0000;	 
+        endcase
+        state <= WAIT_READ_ROM;
+       
+      end else if (zREAD_sync[1]==0 && zaddr>=ram_low && zaddr<ram_high) begin
+        // write RAM
+        
+        dataout <= 0;
+        last_addr <= zaddr;
+        
+        state <= WAIT_WRITE;
+      end else
+        dataout <= 0;
+      
     end else if (!row_fetched && !fetching && counter_y<600) begin
+      // fetch video pixels for current row as quickly as possible
+      
+      dataout <= 0;
       fetching <= 1;
       fetch_x <= 0;
       ram_byte_enable <= 'b1111;
       ram_addr  <= ((counter_y << 10));
       ram_write <= 0;
       ram_enable <= 1;
-    end
+    end else
+      dataout <= 0;
   
   end else if (state == WAIT_READ) begin
-    dataout <= 1;
-    data <= ram_data_out[15:0];
-    ram_enable <= 0;
-    if (!zDOE || znAS) state <= IDLE;
-    
-  end else if (state == WAIT_WRITE) begin
-    ram_enable <= 0;
-    
-    if (writeq_drain<max_fill-1)
-      writeq_drain <= writeq_drain+1;
-    else
-      writeq_drain <= 0;
-    
     if (cmd_ready) begin
-      state <= IDLE;
+      ram_write <= 0;
+      ram_addr <= ((zaddr&'h1fffff)<<1);
+      ram_enable <= 1;
+      state <= WAIT_READ2;
     end
+  end else if (state == WAIT_READ2) begin
+    ram_enable <= 0;
+    if (data_out_ready) begin
+      state <= WAIT_READ3;
+      dataout <= 1;
+      data <= ram_data_out[15:0];
+    end
+  end else if (state == WAIT_READ3) begin
+    if (znAS_sync[1]==1) begin
+      state <= IDLE;
+      dataout <= 0;
+    end
+
+  end else if (state == WAIT_READ_ROM) begin
+    if (!zDOE_sync[1]) begin
+      state <= IDLE;
+      dataout <= 0;
+    end else begin
+      dataout <= 1;
+    end
+   
+  end else if (state == WAIT_WRITE) begin
+    dataout <= 0;
+
+    if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
+      //last_addr <= zaddr;
+      last_data <= data_in;
+      last_ds <= {znLDS_sync[2],znUDS_sync[2]};
+    
+      if (recording==0) begin
+        recording <= 1;
+        trigger_idx <= 0;
+      end else begin
+        recording <= 0;
+        trigger_idx <= rec_idx;
+      end
+      
+      writeq_addr[writeq_fill][23:0] <= last_addr;
+      writeq_addr[writeq_fill][24]   <= ~znLDS_sync[2];
+      writeq_addr[writeq_fill][25]   <= ~znUDS_sync[2];
+      writeq_data[writeq_fill]       <= data_in;
+      
+      if (writeq_fill<max_fill-1)
+        writeq_fill <= writeq_fill+1;
+      else
+        writeq_fill <= 0;
+        
+      state <= WAIT_WRITE2;
+    end
+  end else if (state == WAIT_WRITE2) begin
+    dataout <= 0;
+    if (znAS_sync[1]==1) state <= IDLE;
   end
   
-  if (fetching && state == IDLE) begin
-    // read window
-    
-    ram_data_buffer[fetch_x] <= ram_data_out[15:0];
-    ram_byte_enable <= 'b1111;
-    ram_write <= 0;
-    ram_enable <= 1;
-    
-    if (data_out_ready) begin
-      ram_addr  <= ((counter_y << 10) | fetch_x)<<2;
+  if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1)) || state == WAIT_WRITE2 || state == WAIT_READ3) begin
+    if (fetching && cmd_ready && !data_out_ready) begin
+       // read window
+       ram_addr  <= ((counter_y << 10) | fetch_x)<<2;
+       ram_enable <= 1; // fetch next
+       ram_byte_enable <= 'b1111;
+       ram_write <= 0;
+    end
+ 
+    if (fetching && data_out_ready) begin
+      ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+      ram_enable <= 0;
       
       fetch_x <= fetch_x + 1;
       if (fetch_x > 1023) begin
         fetching <= 0;
         fetch_x  <= 0;
-        row_fetched <= 1;
-        ram_enable <= 0;
+        row_fetched <= 1; // row completely fetched
       end
     end
-  end
-  
-  if (!fetching && state == IDLE && cmd_ready && writeq_fill!=writeq_drain) begin
-    // write window
-    if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
-      ram_byte_enable <= 'b1010; // UDS
-    else if (writeq_addr[writeq_drain][24] && !writeq_addr[writeq_drain][25])
-      ram_byte_enable <= 'b0101; // LDS
-    else
-      ram_byte_enable <= 'b1111;
-    //                       ^^-- currently visible bytes
-    
-    ram_data_in <= (writeq_data[writeq_drain]<<16)|(writeq_data[writeq_drain]);
-    ram_addr    <= (((writeq_addr[writeq_drain][23:0])&'h1ffffe)<<1); // store 16 bit in 32 bit cell      
-    ram_write   <= 1;
-    ram_enable  <= 1;
-    
-    /*last_addr <= writeq_addr[writeq_drain][23:0]; //zaddr;
-    last_data <= writeq_data[writeq_drain]; //data_in;
-    last_lds  <= writeq_addr[writeq_drain][24]; //~znLDS;
-    last_uds  <= writeq_addr[writeq_drain][25]; //~znUDS;*/
-    
-    state <= WAIT_WRITE;
+
+    if (!fetching && cmd_ready && !ram_enable && writeq_fill!=writeq_drain) begin
+      // write window
+      if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
+        ram_byte_enable <= 'b1010; // UDS
+      else if (writeq_addr[writeq_drain][24] && !writeq_addr[writeq_drain][25])
+        ram_byte_enable <= 'b0101; // LDS
+      else
+        ram_byte_enable <= 'b1111;
+      //                       ^^-- currently visible bytes
+      
+      ram_data_in <= (writeq_data[writeq_drain]<<16)|(writeq_data[writeq_drain]);
+      ram_addr    <= (((writeq_addr[writeq_drain][23:0])&'h1ffffe)<<1); // store 16 bit in 32 bit cell      
+      ram_write   <= 1;
+      ram_enable  <= 1;
+      
+      if (writeq_drain<max_fill-1)
+        writeq_drain <= writeq_drain+1;
+      else
+        writeq_drain <= 0;
+    end else if (!fetching) begin
+      ram_enable <= 0;
+      ram_write <= 0;
+    end
   end
   
   if (counter_x==0)
@@ -435,7 +445,7 @@ assign vgaG = rgb[5];
 assign vgaB = rgb[11];*/
 
 always @(posedge vga_clk) begin
-  if (counter_x == h_max) begin
+  if (counter_x >= h_max) begin
     counter_x <= 0;
     if (counter_y == v_max)
       counter_y <= 0;
@@ -468,18 +478,18 @@ always @(posedge vga_clk) begin
     rgb <= 0;
   end
 
-  red_p[7:3]   <= rgb[15:11];
+  red_p[7:3]   <= rgb[4:0];
   green_p[7:2] <= rgb[10:5];
-  blue_p[7:3]  <= rgb[4:0];
+  blue_p[7:3]  <= rgb[15:11];
 
-  red_p[2] <= rgb[11];
-  red_p[1] <= rgb[11];
-  red_p[0] <= rgb[11];
+  red_p[2] <= rgb[0];
+  red_p[1] <= rgb[0];
+  red_p[0] <= rgb[0];
   green_p[1] <= rgb[5];
   green_p[0] <= rgb[5];
-  blue_p[2] <= rgb[0];
-  blue_p[1] <= rgb[0];
-  blue_p[0] <= rgb[0];
+  blue_p[2] <= rgb[11];
+  blue_p[1] <= rgb[11];
+  blue_p[0] <= rgb[11];
 
   /*if (counter_y==0 && (counter_x >= h_max)) begin
     counter_frame <= counter_frame + 1;
@@ -629,8 +639,28 @@ always @(posedge vga_clk) begin
       else begin
         if (counter_x>1023)
           rgb <= 0;
-        else 
-          rgb <= ram_data_buffer[counter_x];
+        
+        else if (counter_x<rec_depth) begin
+          if (counter_y>=100 && counter_y<=145)
+            rgb <= (rec_addr[counter_x][(counter_y-100)>>1])?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=200 && counter_y<=231)
+            rgb <= (rec_data[counter_x][(counter_y-200)>>1])?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=300 && counter_y<=305)
+            rgb <= rec_as[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=306 && counter_y<=310)
+            rgb <= rec_uds[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=311 && counter_y<=315)
+            rgb <= rec_lds[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=316 && counter_y<=320)
+            rgb <= rec_doe[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else if (counter_y>=321 && counter_y<=325)
+            rgb <= rec_read[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
+          else
+            rgb <= ram_data_buffer[counter_x];
+        end else rgb <= ram_data_buffer[counter_x];
+          
+        /*else
+          rgb <= ram_data_buffer[counter_x];*/
       end
 
 end
