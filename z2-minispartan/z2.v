@@ -65,37 +65,39 @@ inout  [15:0] D,
 
 // HDMI
 output [3:0] TMDS_out_P,
-output [3:0] TMDS_out_N
+output [3:0] TMDS_out_N,
+
+`ifdef SIMULATION
+input z_sample_clk,
+input vga_clk
+`endif
 );
 
+`ifndef SIMULATION
 clk_wiz_v3_6 DCM(
   .CLK_IN1(CLK50),
   .CLK_OUT100(z_sample_clk),
   .CLK_OUT75(vga_clk)
 );
-
-/*vga_clocking vga_clocking(
-  .clk50(CLK50),
-  .pixel_clock(vga_clk)
-);*/
+`endif
 
 wire sdram_reset;
 reg  ram_enable = 0;
 reg  [23:0] ram_addr = 0;
-wire [31:0] ram_data_out;
+wire [15:0] ram_data_out;
 wire data_out_ready;
-reg  [31:0] ram_data_in;
+reg  [15:0] ram_data_in;
 reg  ram_write = 0;
-reg  [3:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:1023]; // 640x16bit packed as 320x32bit
+reg  [1:0]  ram_byte_enable;
+reg  [15:0] ram_data_buffer [0:1023]; // 1024x16bit line buffer
 reg  [10:0] fetch_x = 0;
 reg  fetching = 0;
-
 
 // SDRAM
 SDRAM_Controller_v sdram(
   .clk(z_sample_clk),   
   .reset(sdram_reset),
+  
   // command and write port
   .cmd_ready(cmd_ready), 
   .cmd_enable(ram_enable), 
@@ -103,6 +105,7 @@ SDRAM_Controller_v sdram(
   .cmd_byte_enable(ram_byte_enable), 
   .cmd_address(ram_addr), 
   .cmd_data_in(ram_data_in),
+  
   // Read data port
   .data_out(ram_data_out),
   .data_out_ready(data_out_ready),
@@ -133,6 +136,7 @@ reg [3:0] tmds_out_nbuf;
 assign TMDS_out_P = tmds_out_pbuf;
 assign TMDS_out_N = tmds_out_nbuf;
 
+`ifndef SIMULATION
 dvid_out dvid_out(
   // Clocking
   .clk_pixel(vga_clk),
@@ -147,6 +151,7 @@ dvid_out dvid_out(
   .tmds_out_p(tmds_out_pbuf),
   .tmds_out_n(tmds_out_nbuf)
 );
+`endif
 
 assign sdram_reset = 0;
 
@@ -269,11 +274,12 @@ always @(posedge z_sample_clk) begin
         //recording <= 0;
         //trigger_idx <= rec_idx;
         // read RAM
-        dataout <= 0;
+        data <= 'hfff0;
+        dataout <= 1;
         read_fetched <= 0;
         state <= WAIT_READ;
         
-      end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN && zDOE_sync[1]) begin
+      end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
         // read iospace 'he80000 (ROM)
         //recording <= 0;
         //trigger_idx <= rec_idx;
@@ -325,6 +331,7 @@ always @(posedge z_sample_clk) begin
       dataout <= 0;
   
   end else if (state == WAIT_READ) begin
+    data <= 'hfff1;
     if (cmd_ready) begin
       ram_write <= 0;
       ram_addr <= ((zaddr&'h1fffff)<<1);
@@ -332,11 +339,15 @@ always @(posedge z_sample_clk) begin
       state <= WAIT_READ2;
     end
   end else if (state == WAIT_READ2) begin
+    data <= 'hfff2;
     ram_enable <= 0;
     if (data_out_ready) begin
       state <= WAIT_READ3;
-      dataout <= 1;
+`ifdef SIMULATION
+      data <= 'h8765;
+`else
       data <= ram_data_out[15:0];
+`endif
     end
   end else if (state == WAIT_READ3) begin
     if (znAS_sync[1]==1) begin
@@ -345,7 +356,7 @@ always @(posedge z_sample_clk) begin
     end
 
   end else if (state == WAIT_READ_ROM) begin
-    if (!zDOE_sync[1]) begin
+    if (znAS_sync[1]==1) begin
       state <= IDLE;
       dataout <= 0;
     end else begin
@@ -388,9 +399,9 @@ always @(posedge z_sample_clk) begin
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1)) || state == WAIT_WRITE2 || state == WAIT_READ3) begin
     if (fetching && cmd_ready && !data_out_ready) begin
        // read window
-       ram_addr  <= ((counter_y << 10) | fetch_x)<<2;
+       ram_addr  <= ((counter_y << 10) | fetch_x);
        ram_enable <= 1; // fetch next
-       ram_byte_enable <= 'b1111;
+       ram_byte_enable <= 'b11;
        ram_write <= 0;
     end
  
@@ -409,15 +420,14 @@ always @(posedge z_sample_clk) begin
     if (!fetching && cmd_ready && !ram_enable && writeq_fill!=writeq_drain) begin
       // write window
       if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
-        ram_byte_enable <= 'b1010; // UDS
+        ram_byte_enable <= 'b10; // UDS
       else if (writeq_addr[writeq_drain][24] && !writeq_addr[writeq_drain][25])
-        ram_byte_enable <= 'b0101; // LDS
+        ram_byte_enable <= 'b01; // LDS
       else
-        ram_byte_enable <= 'b1111;
-      //                       ^^-- currently visible bytes
+        ram_byte_enable <= 'b11;
       
-      ram_data_in <= (writeq_data[writeq_drain]<<16)|(writeq_data[writeq_drain]);
-      ram_addr    <= (((writeq_addr[writeq_drain][23:0])&'h1ffffe)<<1); // store 16 bit in 32 bit cell      
+      ram_data_in <= (writeq_data[writeq_drain]);
+      ram_addr    <= (((writeq_addr[writeq_drain][23:0])&'h1ffffe)>>1);   
       ram_write   <= 1;
       ram_enable  <= 1;
       

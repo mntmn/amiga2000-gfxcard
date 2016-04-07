@@ -55,8 +55,8 @@ module SDRAM_Controller_v (
    input  cmd_enable;
    input  cmd_wr;
    input  [sdram_address_width-1:0] cmd_address;
-   input  [3:0]  cmd_byte_enable;
-   input  [31:0] cmd_data_in;
+   input  [1:0]  cmd_byte_enable;
+   input  [15:0] cmd_data_in;
            
    //-----------------------------------------------
    //--!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -70,7 +70,7 @@ module SDRAM_Controller_v (
    reg [1:0]  iob_dqm      = 2'b00;
    reg iob_cke             = 1'b0;
    reg [1:0]  iob_bank     = 2'b00;
-   reg [31:0] data_out_reg;
+   reg [15:0] data_out_reg;
    //synthesis attribute IOB of iob_command is "TRUE" 
    //synthesis attribute IOB of iob_address is "TRUE" 
    //synthesis attribute IOB of iob_data    is "TRUE" 
@@ -78,8 +78,8 @@ module SDRAM_Controller_v (
    //synthesis attribute IOB of iob_cke     is "TRUE" 
    //synthesis attribute IOB of iob_bank    is "TRUE" 
 
-   reg [15:0] iob_data_next = 16'b0;
-   output [31:0] data_out;    assign data_out       = data_out_reg;
+   //reg [15:0] iob_data_next = 16'b0;
+   output [15:0] data_out;    assign data_out       = data_out_reg;
 
    reg data_out_ready_reg;
    output data_out_ready;     assign data_out_ready = data_out_ready_reg;
@@ -121,10 +121,10 @@ module SDRAM_Controller_v (
    parameter CMD_LOAD_MODE_REG = 4'b0000;
 
    wire [12:0] MODE_REG; // Reserved, wr bust, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
-   assign      MODE_REG =    {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b001};
+   assign      MODE_REG =    {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b000};
 
    reg  [15:0] captured_data; 
-   reg  [15:0] captured_data_last;
+   //reg  [15:0] captured_data_last;
    wire [15:0] sdram_din;
 
    ///////////////////////////////
@@ -154,16 +154,16 @@ module SDRAM_Controller_v (
    wire [1:0]  addr_bank;
 
    // shift register to hold the DQM bits
-   parameter dqm_sr_high = 3;
-   reg [dqm_sr_high:0] dqm_sr = 4'b1111; // an extra two bits in case CAS=3
+   //parameter dqm_sr_high = 1;
+   //reg [dqm_sr_high:0] dqm_sr = 2'b11; // an extra two bits in case CAS=3
    
    // signals to hold the requested transaction before it is completed
    reg save_wr                  = 1'b0; 
    reg [sdram_row_bits-1:0] save_row          = 13'b0000000000000;
    reg [1:0]  save_bank         = 2'b00;
    reg [sdram_column_bits-1:0] save_col          = 13'b0000000000000;
-   reg [31:0] save_data_in      = 32'b00000000000000000000000000000000;
-   reg [3:0]  save_byte_enable  = 3'b0000;
+   reg [15:0] save_data_in      = 16'b0000000000000000;
+   reg [1:0]  save_byte_enable  = 2'b00;
    
    // control when new transactions are accepted 
    reg ready_for_new    = 1'b0;
@@ -203,7 +203,7 @@ module SDRAM_Controller_v (
    assign addr_col[sdram_column_bits-1:0]     = cmd_address[end_of_col:start_of_col];
    //assign addr_col[0]                         = 1'b0;
    
-   wire [31:0] sdram_data_wire; assign SDRAM_DATA = sdram_data_wire;
+   wire [15:0] sdram_data_wire; assign SDRAM_DATA = sdram_data_wire;
    //-----------------------------------------------------------
    // Forward the SDRAM clock to the SDRAM chip - 180 degress 
    // out of phase with the control signals (ensuring setup and holdup times
@@ -240,7 +240,7 @@ always  @ (posedge clk ) captured_data      <= sdram_din;
 
 always  @ (posedge clk )
    begin
-      captured_data_last <= captured_data;
+      //captured_data_last <= captured_data;
       
       //------------------------------------------------
       //-- Default state is to do nothing
@@ -281,7 +281,7 @@ always  @ (posedge clk )
       //------------------------------------------------
       data_out_ready_reg <= 1'b0;
       if (data_ready_delay[0] == 1'b1) begin
-         data_out_reg       <= {captured_data, captured_data_last};
+         data_out_reg       <= {captured_data, captured_data};
          data_out_ready_reg <= 1'b1;
       end
          
@@ -289,8 +289,8 @@ always  @ (posedge clk )
       //-- update shift registers used to choose when to present data to/from memory
       //----------------------------------------------------------------------------
       data_ready_delay <= {1'b0, data_ready_delay[data_ready_delay_high:1]};
-      iob_dqm       <= dqm_sr[1:0];
-      dqm_sr        <= {2'b11, dqm_sr[dqm_sr_high:2]};
+      //iob_dqm       <= dqm_sr[1:0];
+      //dqm_sr        <= {2'b11, dqm_sr[dqm_sr_high:2]};
          
       case(state) 
          s_startup: begin
@@ -407,7 +407,7 @@ always  @ (posedge clk )
                
                // Set the data masks to read all bytes
                iob_dqm     <= 2'b00;
-               dqm_sr[1:0] <= 2'b00;
+               //dqm_sr[1:0] <= 2'b00;
             end   
          s_read_2: begin
                state <= s_read_3;
@@ -453,16 +453,19 @@ always  @ (posedge clk )
                iob_address[prefresh_cmd] <= 1'b0; // A10 actually matters - it selects auto precharge
                iob_bank                  <= save_bank;
                iob_dqm                   <= ~ save_byte_enable[1:0];    
-               dqm_sr[1:0]               <= ~ save_byte_enable[3:2];    
+               //dqm_sr[1:0]               <= ~ save_byte_enable[3:2];    
                iob_data                  <= save_data_in[15:0];
-               iob_data_next             <= save_data_in[31:16];
+               //iob_data_next             <= save_data_in[31:16];
             end
          s_write_2: begin
+            $display("w2 %h\t%h\t%h", save_bank, save_row, iob_address);
                state           <= s_write_3;
-               iob_data        <= iob_data_next;
+               //iob_data        <= iob_data_next;
                // can we do a back-to-back write?
                if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b1) begin
+                     $display("back-to-back write");
+                     
                      // back-to-back write?
                      state           <= s_write_1;
                      ready_for_new   <= 1'b1;
