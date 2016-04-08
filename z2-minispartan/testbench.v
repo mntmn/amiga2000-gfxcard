@@ -15,7 +15,7 @@ module testbench;
    reg data_out_ready = 0;
    reg cmd_ready = 0;
 
-   reg rtoggle = 1;
+   reg rtoggle = 0;
    
    wire [15:0] zD;
    
@@ -47,7 +47,7 @@ module testbench;
      begin
         #0 zREAD = 1;
         #130 zREAD = rtoggle;
-        //rtoggle = !rtoggle;
+        rtoggle = !rtoggle;
         
         #12 znAS = 0;
         zA = zA + 2;

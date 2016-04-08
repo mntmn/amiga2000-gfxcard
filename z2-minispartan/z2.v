@@ -65,9 +65,10 @@ inout  [15:0] D,
 
 // HDMI
 output [3:0] TMDS_out_P,
-output [3:0] TMDS_out_N,
+output [3:0] TMDS_out_N
 
 `ifdef SIMULATION
+,
 input z_sample_clk,
 input vga_clk
 `endif
@@ -263,10 +264,10 @@ always @(posedge z_sample_clk) begin
   end else
     rec_idx <= rec_idx+1;
 
+  ram_write <= 0;
+  //ram_enable <= 0;
+   
   if (state == IDLE) begin
-    ram_write <= 0;
-    ram_enable <= 0;
-    
     if (znAS_sync[1]==0) begin
       // zorro gives us an address
       
@@ -274,10 +275,11 @@ always @(posedge z_sample_clk) begin
         //recording <= 0;
         //trigger_idx <= rec_idx;
         // read RAM
-        data <= 'hfff0;
-        dataout <= 1;
         read_fetched <= 0;
-        state <= WAIT_READ;
+        if (!fetching || (fetching && cmd_ready && !data_out_ready)) begin
+          state <= WAIT_READ;
+        end
+        ram_enable <= 0;
         
       end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
         // read iospace 'he80000 (ROM)
@@ -331,7 +333,6 @@ always @(posedge z_sample_clk) begin
       dataout <= 0;
   
   end else if (state == WAIT_READ) begin
-    data <= 'hfff1;
     if (cmd_ready) begin
       ram_write <= 0;
       ram_addr <= ((zaddr&'h1fffff)<<1);
@@ -339,9 +340,9 @@ always @(posedge z_sample_clk) begin
       state <= WAIT_READ2;
     end
   end else if (state == WAIT_READ2) begin
-    data <= 'hfff2;
     ram_enable <= 0;
     if (data_out_ready) begin
+      dataout <= 1;
       state <= WAIT_READ3;
 `ifdef SIMULATION
       data <= 'h8765;
@@ -397,27 +398,24 @@ always @(posedge z_sample_clk) begin
   end
   
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1)) || state == WAIT_WRITE2 || state == WAIT_READ3) begin
-    if (fetching && cmd_ready && !data_out_ready) begin
-       // read window
-       ram_addr  <= ((counter_y << 10) | fetch_x);
-       ram_enable <= 1; // fetch next
-       ram_byte_enable <= 'b11;
-       ram_write <= 0;
-    end
- 
-    if (fetching && data_out_ready) begin
+    if (fetching && cmd_ready && (data_out_ready || fetch_x==0)) begin
       ram_data_buffer[fetch_x] <= ram_data_out[15:0];
-      ram_enable <= 0;
       
       fetch_x <= fetch_x + 1;
-      if (fetch_x > 1023) begin
+      if (fetch_x > 800) begin
         fetching <= 0;
         fetch_x  <= 0;
         row_fetched <= 1; // row completely fetched
       end
+       
+      // read window
+      ram_addr  <= ((counter_y << 10) | fetch_x);
+      ram_enable <= 1; // fetch next
+      ram_byte_enable <= 'b11;
+      ram_write <= 0;
     end
 
-    if (!fetching && cmd_ready && !ram_enable && writeq_fill!=writeq_drain) begin
+    if (!fetching && cmd_ready && writeq_fill!=writeq_drain) begin
       // write window
       if (writeq_addr[writeq_drain][25] && !writeq_addr[writeq_drain][24])
         ram_byte_enable <= 'b10; // UDS
@@ -435,14 +433,13 @@ always @(posedge z_sample_clk) begin
         writeq_drain <= writeq_drain+1;
       else
         writeq_drain <= 0;
-    end else if (!fetching) begin
-      ram_enable <= 0;
-      ram_write <= 0;
     end
   end
   
-  if (counter_x==0)
+  if (counter_x==0) begin
     row_fetched <= 0;
+    fetch_x <= 0;
+  end
 end
 
 /*assign vgaHSync = ~hs;
