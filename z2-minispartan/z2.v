@@ -90,7 +90,7 @@ wire data_out_ready;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:1023]; // 1024x16bit line buffer
+reg  [15:0] ram_data_buffer [0:799]; // 1024x16bit line buffer
 reg  [10:0] fetch_x = 0;
 reg  fetching = 0;
 
@@ -178,7 +178,7 @@ reg [15:0] data_in;
 reg dataout = 0;
 
 assign zDIR     = !(dataout);
-assign znSLAVEN = !(dataout && zDOE && zREAD);
+assign znSLAVEN = !(dataout && zDOE);
 assign zD  = (dataout) ? data : 16'bzzzz_zzzz_zzzz_zzzz;
 
 reg [23:0] last_addr = 0;
@@ -193,7 +193,7 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 1024;
+parameter max_fill = 2000;
 
 reg [25:0] writeq_addr [0:max_fill-1]; // 25=uds 24=lds
 reg [15:0] writeq_data [0:max_fill-1];
@@ -222,6 +222,9 @@ parameter ram_high = 24'h740000;
 parameter rom_low  = 24'he80000;
 parameter rom_high = 24'he80100;
 
+reg wdelay = 0; // write switchoff delay
+
+/*
 parameter rec_depth = 16;
 
 reg [23:0] rec_addr [0:rec_depth-1];
@@ -236,7 +239,7 @@ reg recording = 1;
 reg [6:0] rec_idx; // up to rec_depth
 reg [6:0] trigger_idx;
 reg read_fetched = 0;
-
+*/
 always @(posedge z_sample_clk) begin
 
   // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
@@ -250,7 +253,7 @@ always @(posedge z_sample_clk) begin
   data_in <= zD;
   zaddr <= zA;
   
-  rec_addr[rec_idx] <= zaddr;
+  /*rec_addr[rec_idx] <= zaddr;
   rec_data[rec_idx] <= data_in;
   rec_as[rec_idx]   <= znAS_sync[1];
   rec_lds[rec_idx]  <= znLDS_sync[1];
@@ -262,9 +265,9 @@ always @(posedge z_sample_clk) begin
     if (recording)
       rec_idx <= 0;
   end else
-    rec_idx <= rec_idx+1;
+    rec_idx <= rec_idx+1;*/
 
-  ram_write <= 0;
+  //ram_write <= 0;
   //ram_enable <= 0;
    
   if (state == IDLE) begin
@@ -272,19 +275,15 @@ always @(posedge z_sample_clk) begin
       // zorro gives us an address
       
       if (zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) begin
-        //recording <= 0;
-        //trigger_idx <= rec_idx;
         // read RAM
-        read_fetched <= 0;
         if (!fetching || (fetching && cmd_ready && !data_out_ready)) begin
           state <= WAIT_READ;
         end
         ram_enable <= 0;
+        dataout <= 1;
         
       end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
         // read iospace 'he80000 (ROM)
-        //recording <= 0;
-        //trigger_idx <= rec_idx;
         dataout <= 1;
         last_addr <= zaddr;
         
@@ -335,8 +334,9 @@ always @(posedge z_sample_clk) begin
   end else if (state == WAIT_READ) begin
     if (cmd_ready) begin
       ram_write <= 0;
-      ram_addr <= ((zaddr&'h1fffff)<<1);
+      ram_addr <= ((zaddr&'h1ffffe)>>1);
       ram_enable <= 1;
+      ram_byte_enable <= 'b11;
       state <= WAIT_READ2;
     end
   end else if (state == WAIT_READ2) begin
@@ -351,6 +351,7 @@ always @(posedge z_sample_clk) begin
 `endif
     end
   end else if (state == WAIT_READ3) begin
+    data <= ram_data_out[15:0];
     if (znAS_sync[1]==1) begin
       state <= IDLE;
       dataout <= 0;
@@ -372,13 +373,13 @@ always @(posedge z_sample_clk) begin
       last_data <= data_in;
       last_ds <= {znLDS_sync[2],znUDS_sync[2]};
     
-      if (recording==0) begin
+      /*if (recording==0) begin
         recording <= 1;
         trigger_idx <= 0;
       end else begin
         recording <= 0;
         trigger_idx <= rec_idx;
-      end
+      end*/
       
       writeq_addr[writeq_fill][23:0] <= last_addr;
       writeq_addr[writeq_fill][24]   <= ~znLDS_sync[2];
@@ -434,6 +435,17 @@ always @(posedge z_sample_clk) begin
       else
         writeq_drain <= 0;
     end
+    
+    if (!fetching && (writeq_fill==writeq_drain)) begin
+      if (wdelay>=2) begin
+        ram_enable <= 0;
+        ram_write <= 0;
+        ram_byte_enable <= 'b11;
+        wdelay <= 0;
+      end else begin
+        wdelay <= wdelay+1;
+      end
+    end
   end
   
   if (counter_x==0) begin
@@ -485,18 +497,32 @@ always @(posedge vga_clk) begin
     rgb <= 0;
   end
 
-  red_p[7:3]   <= rgb[4:0];
-  green_p[7:2] <= rgb[10:5];
-  blue_p[7:3]  <= rgb[15:11];
-
-  red_p[2] <= rgb[0];
-  red_p[1] <= rgb[0];
-  red_p[0] <= rgb[0];
-  green_p[1] <= rgb[5];
-  green_p[0] <= rgb[5];
-  blue_p[2] <= rgb[11];
-  blue_p[1] <= rgb[11];
-  blue_p[0] <= rgb[11];
+  blue_p[0] <= rgb[3];
+  blue_p[1] <= rgb[4];
+  blue_p[2] <= rgb[5];
+  blue_p[3] <= rgb[5];
+  blue_p[4] <= rgb[6];
+  blue_p[5] <= rgb[6];
+  blue_p[6] <= rgb[7];
+  blue_p[7] <= rgb[7];
+  
+  green_p[0] <= rgb[13];
+  green_p[1] <= rgb[14];
+  green_p[2] <= rgb[15];
+  green_p[3] <= rgb[0];
+  green_p[4] <= rgb[1];
+  green_p[5] <= rgb[1];
+  green_p[6] <= rgb[2];
+  green_p[7] <= rgb[2];
+  
+  red_p[0] <= rgb[8];
+  red_p[1] <= rgb[9];
+  red_p[2] <= rgb[10];
+  red_p[3] <= rgb[10];
+  red_p[4] <= rgb[11];  
+  red_p[5] <= rgb[11];
+  red_p[6] <= rgb[12];
+  red_p[7] <= rgb[12];
 
   /*if (counter_y==0 && (counter_x >= h_max)) begin
     counter_frame <= counter_frame + 1;
@@ -644,10 +670,10 @@ always @(posedge vga_clk) begin
           rgb <= 0;
         end
       else begin
-        if (counter_x>1023)
+        if (counter_x>799)
           rgb <= 0;
         
-        else if (counter_x<rec_depth) begin
+        /*else if (counter_x<rec_depth) begin
           if (counter_y>=100 && counter_y<=145)
             rgb <= (rec_addr[counter_x][(counter_y-100)>>1])?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
           else if (counter_y>=200 && counter_y<=231)
@@ -663,8 +689,8 @@ always @(posedge vga_clk) begin
           else if (counter_y>=321 && counter_y<=325)
             rgb <= rec_read[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
           else
-            rgb <= ram_data_buffer[counter_x];
-        end else rgb <= ram_data_buffer[counter_x];
+            rgb <= ram_data_buffer[counter_x];*/
+        else rgb <= ram_data_buffer[counter_x];
           
         /*else
           rgb <= ram_data_buffer[counter_x];*/
