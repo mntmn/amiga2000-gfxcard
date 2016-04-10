@@ -260,6 +260,8 @@ always  @ (posedge clk )
       //-- and if it can be back-to-backed with the last transaction
       //-------------------------------------------------------------------
       if (ready_for_new == 1'b1 && cmd_enable == 1'b1) begin
+         //$display("%h r: %h c: %h",cmd_address,addr_row,addr_col);
+         
          if(save_bank == addr_bank && save_row == addr_row) 
             can_back_to_back <= 1'b1;
          else

@@ -47,7 +47,7 @@ module testbench;
      begin
         #0 zREAD = 1;
         #130 zREAD = rtoggle;
-        rtoggle = !rtoggle;
+        //rtoggle = !rtoggle;
         
         #12 znAS = 0;
         zA = zA + 2;
