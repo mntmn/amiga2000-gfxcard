@@ -220,7 +220,8 @@ parameter ram_high = 24'h740000;
 parameter rom_low  = 24'he80000;
 parameter rom_high = 24'he80100;
 
-reg [4:0] wdelay = 0; // write switchoff delay
+reg burst_enable = 0; // already triggered a burst for fetching consecutive pixels?
+reg [4:0] wdelay = 0; // write switchoff delay (used at the end of draining write queue)
 reg [4:0] read_delay = 0;
 /*
 parameter rec_depth = 16;
@@ -284,6 +285,7 @@ always @(posedge z_sample_clk) begin
         ram_enable <= 1;
         ram_byte_enable <= 'b11;
         fetching <= 0;
+        burst_enable <= 0;
         
         state <= WAIT_READ;
                 
@@ -327,6 +329,7 @@ always @(posedge z_sample_clk) begin
     end else if (!row_fetched && !fetching && counter_y<600 && ((writeq_fill-writeq_drain)<1000) ) begin
       // fetch video pixels for current row as quickly as possible
       
+      burst_enable <= 1;
       dataout <= 0;
       fetching <= 1;
       fetch_x <= 0;
@@ -397,7 +400,7 @@ always @(posedge z_sample_clk) begin
   
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))
       || state == WAIT_WRITE2) begin
-    if (fetching && cmd_ready && (data_out_ready || fetch_x==0) && state!=WAIT_READ2) begin
+    if (fetching /*&& cmd_ready && (data_out_ready || fetch_x==0)*/ && state!=WAIT_READ2) begin
       ram_data_buffer[fetch_x] <= ram_data_out[15:0];
       
       fetch_x <= fetch_x + 1;
@@ -405,6 +408,8 @@ always @(posedge z_sample_clk) begin
         fetching <= 0;
         fetch_x  <= 0;
         row_fetched <= 1; // row completely fetched
+        burst_enable <= 0;
+        // TODO burst terminate?
       end
       
       // catch up with counter if we're behind
@@ -414,7 +419,13 @@ always @(posedge z_sample_clk) begin
        
       // read window
       ram_addr  <= ((counter_y << 10) | fetch_x);
-      ram_enable <= 1; // fetch next
+      if (!burst_enable) begin
+        burst_enable <= 1;
+        ram_enable <= 1; // fetch next burst
+      end else begin
+        ram_enable <= 0; // burst still running
+      end
+      
       ram_byte_enable <= 'b11;
       ram_write <= 0;
     end
@@ -433,6 +444,7 @@ always @(posedge z_sample_clk) begin
       ram_write   <= 1;
       ram_enable  <= 1;
       wdelay <= 0;
+      burst_enable <= 0;
       
       if (writeq_drain<max_fill-1)
         writeq_drain <= writeq_drain+1;

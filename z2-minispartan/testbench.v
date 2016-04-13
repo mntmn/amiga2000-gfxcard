@@ -74,7 +74,7 @@ module testbench;
      #5 z_sample_clk = !z_sample_clk;
 
    always
-     #13.3 vgaclk = !vgaclk;
+     #6.65 vgaclk = !vgaclk;
    
    always
      begin

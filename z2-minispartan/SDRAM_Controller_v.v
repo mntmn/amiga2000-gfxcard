@@ -71,6 +71,9 @@ module SDRAM_Controller_v (
    reg iob_cke             = 1'b0;
    reg [1:0]  iob_bank     = 2'b00;
    reg [15:0] data_out_reg;
+
+   reg        bursting = 0;
+   
    //synthesis attribute IOB of iob_command is "TRUE" 
    //synthesis attribute IOB of iob_address is "TRUE" 
    //synthesis attribute IOB of iob_data    is "TRUE" 
@@ -121,7 +124,7 @@ module SDRAM_Controller_v (
    parameter CMD_LOAD_MODE_REG = 4'b0000;
 
    wire [12:0] MODE_REG; // Reserved, wr bust, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
-   assign      MODE_REG =    {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b000};
+   assign      MODE_REG =    {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b111};
 
    reg  [15:0] captured_data; 
    //reg  [15:0] captured_data_last;
@@ -283,7 +286,7 @@ always  @ (posedge clk )
       //------------------------------------------------
       data_out_ready_reg <= 1'b0;
       if (data_ready_delay[0] == 1'b1) begin
-         data_out_reg       <= {captured_data, captured_data};
+         data_out_reg       <= captured_data;
          data_out_ready_reg <= 1'b1;
       end
          
@@ -410,14 +413,23 @@ always  @ (posedge clk )
                // Set the data masks to read all bytes
                iob_dqm     <= 2'b00;
                //dqm_sr[1:0] <= 2'b00;
+
+               bursting <= 1;
             end   
          s_read_2: begin
-               state <= s_read_3;
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
-                  if (save_wr == 1'b0) begin 
-                     state           <= s_read_1;
-                     ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
-                     got_transaction <= 1'b0;
+               if (bursting) begin
+                  data_ready_delay[0] <= 1;
+
+                  if (got_transaction) bursting <= 0;
+               end else begin
+                  state <= s_read_3;
+
+                  if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+                     if (save_wr == 1'b0) begin 
+                        state           <= s_read_1;
+                        ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
+                        got_transaction <= 1'b0;
+                     end
                   end
                end
             end   
