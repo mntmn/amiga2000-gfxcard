@@ -82,6 +82,8 @@ clk_wiz_v3_6 DCM(
 );
 `endif
 
+parameter screen_w = 800;
+
 wire sdram_reset;
 reg  ram_enable = 0;
 reg  [23:0] ram_addr = 0;
@@ -90,7 +92,7 @@ wire data_out_ready;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:799]; // 1024x16bit line buffer
+reg  [15:0] ram_data_buffer [0:screen_w-1]; // 1024x16bit line buffer
 reg  [10:0] fetch_x = 0;
 reg  fetching = 0;
 
@@ -189,7 +191,7 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 2100;
+parameter max_fill = 2050;
 parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
@@ -401,7 +403,7 @@ always @(posedge z_sample_clk) begin
       ram_data_buffer[fetch_x] <= ram_data_out[15:0];
       
       fetch_x <= fetch_x + 1;
-      if (fetch_x > 800) begin
+      if (fetch_x > screen_w) begin
         fetching <= 0;
         fetch_x  <= 0;
         row_fetched <= 1; // row completely fetched
@@ -481,7 +483,6 @@ always @(posedge vga_clk) begin
     dvi_vsync <= 0;
       
   if (counter_x<h_rez && counter_y<v_rez) begin
-    rgb <= ram_data_buffer[counter_x];
     dvi_blank <= 0;
   end else begin
     dvi_blank <= 1;
@@ -523,7 +524,7 @@ always @(posedge vga_clk) begin
 	  else
       //rgb <= ram_data_buffer[counter_x];
       
-      if (counter_y>600) begin
+      if (counter_y>710) begin
         if (counter_x<210)
           rgb <= 0;
         else if (counter_x<220)
@@ -650,7 +651,7 @@ always @(posedge vga_clk) begin
           rgb <= 0;
         end
       else begin
-        if (counter_x>799)
+        if (counter_x>=(screen_w+240) || counter_x<240)
           rgb <= 0;
         
         /*else if (counter_x<rec_depth) begin
@@ -670,7 +671,7 @@ always @(posedge vga_clk) begin
             rgb <= rec_read[counter_x]?(trigger_idx==counter_x?'hff00:'hffff):'h0000;
           else
             rgb <= ram_data_buffer[counter_x];*/
-        else rgb <= ram_data_buffer[counter_x];
+        else rgb <= ram_data_buffer[counter_x-240];
           
         /*else
           rgb <= ram_data_buffer[counter_x];*/
