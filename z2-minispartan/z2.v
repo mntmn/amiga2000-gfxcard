@@ -94,6 +94,7 @@ reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
 reg  [15:0] ram_data_buffer [0:screen_w-1]; // 1024x16bit line buffer
 reg  [10:0] fetch_x = 0;
+reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
 
 // SDRAM
@@ -191,7 +192,7 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 2050;
+parameter max_fill = 1000;
 parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
@@ -333,7 +334,7 @@ always @(posedge z_sample_clk) begin
       fetching <= 1;
       fetch_x <= 0;
       ram_byte_enable <= 'b1111;
-      ram_addr  <= ((counter_y << 10));
+      ram_addr  <= ((fetch_y << 10));
       ram_write <= 0;
       ram_enable <= 1;
     end else
@@ -349,6 +350,10 @@ always @(posedge z_sample_clk) begin
       dataout <= 0;
       dataout_enable <= 0;
       ram_enable <= 0;
+      if (!row_fetched) begin
+        fetching <= 1;
+        //fetch_x <= fetch_x + 16;
+      end
     end else begin
       dataout <= 1;
       dataout_enable <= 1;
@@ -415,7 +420,7 @@ always @(posedge z_sample_clk) begin
       end*/
        
       // read window
-      ram_addr  <= ((counter_y << 10) | fetch_x);
+      ram_addr  <= ((fetch_y << 10) + fetch_x);
       ram_enable <= 1; // fetch next
       ram_byte_enable <= 'b11;
       ram_write <= 0;
@@ -454,9 +459,10 @@ always @(posedge z_sample_clk) begin
     end
   end
   
-  if (counter_x==0) begin
+  if (counter_x==h_max-200) begin
     row_fetched <= 0;
     fetch_x <= 0;
+    fetch_y <= counter_y;
   end
 end
 
@@ -488,8 +494,35 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
     rgb <= 0;
   end
+  
+  red_p[0] <= rgb[0];
+  red_p[1] <= rgb[0];
+  red_p[2] <= rgb[1];
+  red_p[3] <= rgb[1];
+  red_p[4] <= rgb[2];
+  red_p[5] <= rgb[2];
+  red_p[6] <= rgb[3];
+  red_p[7] <= rgb[4];
+  
+  green_p[0] <= rgb[5];
+  green_p[1] <= rgb[5];
+  green_p[2] <= rgb[6];
+  green_p[3] <= rgb[6];
+  green_p[4] <= rgb[7];
+  green_p[5] <= rgb[8];
+  green_p[6] <= rgb[9];
+  green_p[7] <= rgb[10];
+  
+  blue_p[0] <= rgb[11];
+  blue_p[1] <= rgb[11];
+  blue_p[2] <= rgb[12];
+  blue_p[3] <= rgb[12];
+  blue_p[4] <= rgb[13];  
+  blue_p[5] <= rgb[13];
+  blue_p[6] <= rgb[14];
+  blue_p[7] <= rgb[15];
 
-  blue_p[0] <= rgb[3];
+  /*blue_p[0] <= rgb[3];
   blue_p[1] <= rgb[4];
   blue_p[2] <= rgb[5];
   blue_p[3] <= rgb[5];
@@ -514,7 +547,7 @@ always @(posedge vga_clk) begin
   red_p[4] <= rgb[11];  
   red_p[5] <= rgb[11];
   red_p[6] <= rgb[12];
-  red_p[7] <= rgb[12];
+  red_p[7] <= rgb[12];*/
 
   LEDS <= 0;
 	//rgb <= 0;
