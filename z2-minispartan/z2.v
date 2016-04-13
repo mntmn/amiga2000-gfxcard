@@ -340,9 +340,11 @@ always @(posedge z_sample_clk) begin
     end else
       dataout <= 0;
   
-  end else if (state == WAIT_READ) begin
-    if (data_out_ready) begin
+  end else if (state == WAIT_READ || state == WAIT_READ2) begin
+    if (data_out_ready && state == WAIT_READ) begin
       last_data <= ram_data_out[15:0];
+      // problem: this will serve bursts to the host
+      state <= WAIT_READ2;
     end
     
     if (znAS_sync[1]==1) begin
@@ -400,7 +402,7 @@ always @(posedge z_sample_clk) begin
   
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))
       || state == WAIT_WRITE2) begin
-    if (fetching /*&& cmd_ready && (data_out_ready || fetch_x==0)*/ && state!=WAIT_READ2) begin
+    if (fetching /*&& cmd_ready && (data_out_ready || fetch_x==0)*/) begin
       ram_data_buffer[fetch_x] <= ram_data_out[15:0];
       
       fetch_x <= fetch_x + 1;
