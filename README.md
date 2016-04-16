@@ -55,19 +55,25 @@ So I fired up the open source circuit design tool KiCad and started some schemat
 
 ![68000 Read Cycle](pics/schematics-zorro.png)
 
+Source: http://courses.cs.tamu.edu/cpsc462/walker/Slides/68K_Timing_Diagrams.pdf
+
 I figured that I needed to connect most of these signals to the FPGA and then write another loop in Verilog that would interpret the Amiga's bus commands and act on them (store the data given on the bus in the RAM or return stuff from the RAM). 
 
 On the other side of the FPGA, I decided to place an Analog Devices ADV7125 digital to analog converter (DAC) chip that would generate the analog R, G and B channels for the VGA port from the bits coming from the framebuffer.
 
 ![Analog Devices ADV7125](pics/proto1/adv7125-diagram.png)
 
+Source: http://www.analog.com/media/en/technical-documentation/data-sheets/ADV7125.pdf
+
 The next hurdle appeared: The Spartan communicate with modern 3.3V logic levels, but the Amiga used legacy 5V signals. So I needed to put voltage translators (also called level shifters) between the Zorro and the FPGA pins. I decided to split the signals into bundles of 8 and use six 8-bit "auto-direction-sensing" TXS0108 chips.
 
-![Texas Instruments TXS0108](pics/proto1/txs0108e-application.png) 
+![Texas Instruments TXS0108](pics/proto1/txs0108e-application.png)
+
+Source: http://www.ti.com/lit/ds/symlink/txs0108e.pdf
 
 ## Mistake: Trying to be too smart
 
-I then realized that the Papilio, the FPGA board I had, didn't have enough I/O pins to connect to the 48 Zorro signals and the 16+2 pins required for the VGA DAC output. Actually, it had a lot less pins. So I made a huge mistake and decided to use two 16-bit port switching chips and "select" on the fly a window of the Zorro pins that would be relevant at each state of my bus communication loop; I thought I didn't need to access the data pins at the same time as the address pins and because the FPGA runs at a much higher frequency than the Zorro bus, I could first read one part of the address, switch one of the switches via a control pin and then quickly read the other part to get the whole address.
+I then realized that the Papilio, the FPGA board I had, didn't have enough I/O pins to connect to the 48 Zorro signals and the 16+2 pins required for the VGA DAC output. Actually, it had a lot less pins. So I made a huge mistake and decided to use two 16-bit port switching chips and "select" on the fly a "window" of the Zorro pins that would be relevant at each state of my bus communication loop; I thought I didn't need to access the data pins at the same time as the address pins. And because the FPGA runs at a much higher frequency than the Zorro bus, I could first read one part of the address, switch one of the switches via a control pin and then quickly read the other part to get the whole address.
 
 ![Failed Prototype 1 Schematics](pics/proto1/proto1-schematics.png) 
 
@@ -89,7 +95,7 @@ The first 5 longer, stretched rows in this picture are the signals DOE, READ, /U
 
 The following lines on the grid represent the Address bits A23-A1 in descending order. A0 does not exist; the 68000 selects an upper, lower or both bytes (word access) using /UDS and /LDS instead.
 
-The address signals have regular little chops in them; this is a nasty side effect of switching the multiplexers. You can also see that address bit A9 is constantly turned on, probably due to a soldering error. At least it's possible to see the 68000's read and subsequent write accesses (the only hole in the READ row, second from the top). Ignoring the broken pins A9 and A17, the READ occurs as expected on address binary 111010000000000000000000 and the WRITE on 0b110111111111000110000000. Due to the constant noise and other random failures, I couldn't reliably get the Amiga to reliably read from my card, but it worked at least sometimes, giving me hope.
+The address signals have regular little chops in them; this is a nasty side effect of switching the multiplexers. You can also see that address bit A9 is constantly turned on, probably due to a soldering error. At least it's possible to see the 68000's read and subsequent write accesses (the only hole in the READ row, second from the top). Ignoring the broken pins A9 and A17, the READ occurs as expected on address binary 111010000000000000000000 and the WRITE on 0b110111111111000110000000. Due to the constant noise and other random failures, I couldn't reliably get the Amiga to read from my card, but it worked at least sometimes, giving me hope.
 
 After a few nights of trying to fix this very unstable system, I gave up and went back to the drawing board.
 
@@ -238,7 +244,7 @@ Amiga Hardware Manual: http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_
 
 KiCad Open Source Super Awesome EDA: http://kicad-pcb.org
 
-Thanks to the CommodoreAmiga group on Facebook and thanks to Sebastian Hartmann, Adrian Kaiser, Daniel Zahn, Greta Melnik for inspiration and motivation.
+Thanks to the CommodoreAmiga group on Facebook and thanks to Sebastian Hartmann, Adrian Kaiser, Daniel Zahn, Greta Melnik for inspiration and motivation. Thanks to Jeri Ellsworth for inspiring me to learn Verilog.
 
 Greetings to kipper2k/majsta/BigGun over at the Vampire project!
 
@@ -253,5 +259,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+My dog Tina "helping" me debugging:
 
 ![My dog Tina helping me](pics/proto2/tina-helping.jpg)
