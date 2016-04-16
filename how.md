@@ -14,7 +14,7 @@ The Amiga is probably the last 32-bit personal computer that is fully understood
 
 As a platform for my first attempt (ultimately a failure) I chose the Papilio Pro dev board, which has a Xilinx Spartan 6 FPGA and a few megabytes of  SDRAM connected to it. It also has two pin headers that break out some of the general purpose input/output pins of the Spartan. I thought, OK; I could use the RAM to store the image (a framebuffer), and run a loop that goes through all the columns and rows of the picture in the correct speed and just output the bytes from the RAM to R,G and B output lines. I did this before with little Atmel microcontrollers – "bit-banging" a VGA image directly from the CPU – so I knew it was possible. I just didn't know that SDRAM (synchronous dynamic RAM) was a lot more complex to use than the integrated SRAM (static RAM) of common microcontrollers.
 
-[diagram and explanation of SDRAM timing]
+![SDRAM Timing Example from Alliance Memory Datasheet](pics/sdram-timing-example.png)
 
 I connected an Arduino to the Papilio and used it to send a few address bits and an "on/off" bit to toggle pixels in the framebuffer black or white. This contraption was able to draw basic fonts on my VGA display, and they were successfully kept in the SDRAM. 
 
@@ -65,7 +65,7 @@ It turned out I had made a number of critical mistakes in designing the boards: 
 
 After fighting through all of these issues and burning through a few boards, I finally gut some results. As a first debugging step, I wrote a poor man's logic analyzer in Verilog that would record 640 cycles of all the Zorro Bus signals to FPGA registers (BRAM) and dump them as colorful lines on the VGA screen. This turned out to be a helpful instrument. I wrote a very simple program in 68k assembler for the Amiga that would read – in an endless loop – a word from address $e80000 and write it to $dff180 (a background color register). I made a boot floppy that would run the program, put my card in the A2000, flashed the code and turned everything on.
 
-![Prototype 1 Zorro Bus Analyzer 1](pics/proto1/zorro-signals-2.jpg) 
+![Prototype 1 Zorro Bus Analyzer 1](pics/proto1/zorro-signals2.jpg) 
 
 The first 5 longer, stretched rows in this picture are the signals DOE, READ, /UDS, /AS and E7M (Amiga 7Mhz Clock) sampled at 100 Mhz/Column, so the whole picture displays a time sample of 6400ns (nanoseconds) or 6.4ms (milliseconds).
 
@@ -106,7 +106,7 @@ Picasso96 was one of two competing systems (the other being CyberGraphX) integra
 
 ## Fixing READs
 
-![Prototype 2 Workbench READ noise](pics/proto2/proto2-wb-read-problems.jpg)
+![Prototype 2 Workbench READ noise](pics/proto2/proto2-wb-read-problems2.jpg)
 ![Prototype 2 READ Problems](pics/proto2/proto2-read-problems2.jpg)
 ![Prototype 2 better READs](pics/proto2/proto2-ram-success.jpg)
 
@@ -125,4 +125,7 @@ Picasso96 was one of two competing systems (the other being CyberGraphX) integra
 - read arbitration
 - XRDY (wait states)
 
-## FAQ
+## Sources
+
+http://www.alliancememory.com/pdf/dram/256m-as4c16m16s.pdf
+http://hamsterworks.co.nz/mediawiki/index.php/Simple_SDRAM_Controller
