@@ -1,12 +1,14 @@
 # MNT VA2000, an Amiga 2000 Graphics Card (Zorro II)
 
+![MNT VA2000 Protoype 2 Populated](pics/proto2/proto2-populated2.jpg)
+
 This repository contains my Kicad schematics and Xilinx ISE/Verilog files for my graphics card project. This is a work in progress, started in October 2015. The first 4 prototypes were assembled in Jan/Feb 2016 and had noise problems, so I started a redesign on Feb 13, 2016.
 
 On Mar 27th, 2016, the redesign worked and I could load a 16 bit 565BGR coded raw image from floppy into the graphics card that displayed a 1280x720p resolution (75mhz pixelclock).
 
 In April 2016, I managed to get Workbench running via a reverse engineered Picasso96 driver.
 
-The working Xilinx project for the new target platform (Scarab miniSpartan 6+) is now in the z2-minispartan folder.
+The working Xilinx project for the new target platform (Scarab miniSpartan 6+) is now in the z2-minispartan folder. The main source file is: https://github.com/mntmn/amiga2000-gfxcard/blob/master/z2-minispartan/z2.v
 
 Contains a modified SDRAM controller (Verilog) and a DVI encoder (VHDL) by Mike Field. See credits and license at the end.
 
@@ -14,25 +16,25 @@ Contains a modified SDRAM controller (Verilog) and a DVI encoder (VHDL) by Mike 
 
 _TL;DR: I spent my free time over the course of 5 months to make two open source graphics card prototypes for the Amiga 2000. I will make a third, release version; details at the end._
 
-Somewhere in the middle of 2015 I revived my old A500 and acquired again an A1200, the computer I learned C++ and the basics of web programming on in the late 90s. I also played lots of fantastic Amiga games back in the day, made my first music in ProTracker and my first digital graphics in Deluxe Paint. Re-experiencing the old system that was so ahead of its time again made me curious about Commodore's history and especially about the late, big and ambitious Amiga models (A3000, A4000). This coincided with Amiga's 30th anniversary. A lot of new interviews with the original team(s) popped up, including Dave Haynie, who designed most of the A2000 and the Zorro Bus.
+Somewhere in the middle of 2015 I revived my old A500 and acquired again an A1200. Using the A1200, I learned C++ and the basics of web programming in the late 90s. I also used to play many fantastic Amiga games back in the day, made my first music in ProTracker and my first digital graphics in Deluxe Paint. Re-experiencing the old system that was once so ahead of its time again made me curious about Commodore's history – and especially about the later, big and ambitious Amiga models (A3000, A4000…). This coincided with Amiga's 30th anniversary. A lot of new interviews with the original team(s) popped up, including Dave Haynie, who was a main designer of the A2000 and the Zorro III Bus.
 
 I checked eBay for the "big" Amigas I never had, expecting them to be cheap, but found out that these boxes had turned into valuable collector's items. At the same time, A2000s were (and still are) affordable, so I chose to get one and put a 68040 and a SCSI card in it. But the system couldn't realize it's full potential; in the 90s you could already get, for example, a "Picasso" graphics card that could do VGA (and higher) resolutions at 16 or 24bit color depth. Nowadays, these totally outdated cards are rare and sold for ridiculous prices. My A2000 was stuck with 640x256 PAL resolution, 64 colors (ignoring HAM) or headache-inducing interlaced modes. 
 
-Because of my work with Microcontrollers, writing a low-level OS for Raspberry Pi and my interest in low-level computer architectures in general, I decided in October 2015 in a feat of madness: "I'll just make my own graphics card. How hard can it be?"
+Because of my work with microcontrollers, writing an OS for Raspberry Pi (http://interim.mntmn.com/) and my interest in low-level computer architectures in general, I decided in October 2015 in a feat of madness: "I'll just make my own graphics card. How hard can it be?"
 
-It turned out to be a very, very challenging project, but luckily I came much further than I expected. On the way, I had to learn how to design a PCB and get it manufactured, how to work with SMD parts, how to program in Verilog and synthesize code for an FPGA, how SDRAM and DVI/HDMI work (or how to get them to do at least something). I also had to find out how to write a driver for the sadly closed/undocumented Picasso96 "retargetable" graphics stack for AmigaOS 3.
+It turned out to be a very, very challenging project, but luckily I got much further than expected. On the way, I had to learn how to design a PCB and get it manufactured, how to work with SMD parts, how to program in Verilog and synthesize code for an FPGA, how SDRAM and DVI/HDMI work (or how to get them to do at least something). I also had to find out how to write a driver for the sadly closed/undocumented Picasso96 "retargetable" graphics stack for AmigaOS 3.
 
 The Amiga is probably the last 32-bit personal computer that is fully understood, documented and hackable. Both its hardware and software contain many gems of engineering and design. I hope that one day, we can have a simple but powerful modern computer that is at the same time as hackable and friendly as the Amiga was.
 
 ## The "engine": FPGA and SDRAM
 
-As a platform for my first attempt (ultimately a failure) I chose the Papilio Pro dev board, which has a Xilinx Spartan 6 FPGA and a few megabytes of  SDRAM connected to it. It also has two pin headers that break out some of the general purpose input/output pins of the Spartan. I thought, OK; I could use the RAM to store the image (a framebuffer), and run a loop that goes through all the columns and rows of the picture in the correct speed and just output the bytes from the RAM to R,G and B output lines. I did this before with little Atmel microcontrollers – "bit-banging" a VGA image directly from the CPU – so I knew it was possible. I just didn't know that SDRAM (synchronous dynamic RAM) was a lot more complex to use than the integrated SRAM (static RAM) of common microcontrollers.
+As a platform for my first attempt (ultimately a failure) I chose the Papilio Pro development board, which has a Xilinx Spartan 6 FPGA and a few megabytes of SDRAM connected to it. It also has two pin headers that break out some of the general purpose input/output pins of the Spartan. I thought, OK – I could use the RAM to store the image (a framebuffer), and run a loop that goes through all the columns and rows of the picture in the correct speed and just output the bytes from the RAM to R,G and B output lines. I did this before with little Atmel microcontrollers – "bit-banging" a VGA image directly from the CPU – so I knew it was possible. I just didn't know that SDRAM (synchronous dynamic RAM) was a lot more complex to use than the integrated SRAM (static RAM) of common microcontrollers. To access data in a dynamic ram, you have to open banks, rows, precharge, refresh, and take care of startup and access delays:
 
 ![SDRAM Timing Example from Alliance Memory Datasheet](pics/sdram-timing-example.png)
 
 Source: http://www.alliancememory.com/pdf/dram/256m-as4c16m16s.pdf
 
-I connected an Arduino to the Papilio and used it to send a few address bits and an "on/off" bit to toggle pixels in the framebuffer black or white. This contraption was able to draw basic fonts on my VGA display, and they were successfully kept in the SDRAM. 
+Mike Field's open source SDRAM controller written in VHDL and Verilog helped me get the RAM working. I connected an Arduino to the Papilio and used it to send a few address bits and an "on/off" bit to toggle pixels in the framebuffer black or white. This contraption was able to draw basic fonts on my VGA display, and they were successfully kept in the SDRAM. 
 
 The next step was connecting the FPGA+display part to the Amiga 2000.
 
@@ -55,7 +57,7 @@ So I fired up the open source circuit design tool KiCad and started some schemat
 
 I figured that I needed to connect most of these signals to the FPGA and then write another loop in Verilog that would interpret the Amiga's bus commands and act on them (store the data given on the bus in the RAM or return stuff from the RAM). 
 
-On the other side of the FPGA, I decided to place an Analog Devices DAC(XYZ) digital to analog converter chip that would generate the analog R, G and B channels for the VGA port from the bits coming from the framebuffer.
+On the other side of the FPGA, I decided to place an Analog Devices ADV7125 digital to analog converter (DAC) chip that would generate the analog R, G and B channels for the VGA port from the bits coming from the framebuffer.
 
 ![Analog Devices ADV7125](pics/proto1/adv7125-diagram.png)
 
@@ -65,7 +67,7 @@ The next hurdle appeared: The Spartan communicate with modern 3.3V logic levels,
 
 ## Mistake: Trying to be too smart
 
-I then realized that the Papilio, the FPGA board I had, didn't have enough I/O pins to connect to the 48 Zorro signals and the 16 (?) pins required for the VGA DAC output. Actually, it had a lot less pins. So I made a huge mistake and decided to use two 16-bit port switching chips and "select" on the fly a window of the Zorro pins that would be relevant at each state of my bus communication loop; I thought I didn't need to access the data pins at the same time as the address pins and because the FPGA runs at a much higher frequency than the Zorro bus, I could first read one part of the address, switch one of the switches via a control pin and then quickly read the other part to get the whole address.
+I then realized that the Papilio, the FPGA board I had, didn't have enough I/O pins to connect to the 48 Zorro signals and the 16+2 pins required for the VGA DAC output. Actually, it had a lot less pins. So I made a huge mistake and decided to use two 16-bit port switching chips and "select" on the fly a window of the Zorro pins that would be relevant at each state of my bus communication loop; I thought I didn't need to access the data pins at the same time as the address pins and because the FPGA runs at a much higher frequency than the Zorro bus, I could first read one part of the address, switch one of the switches via a control pin and then quickly read the other part to get the whole address.
 
 ![Failed Prototype 1 Schematics](pics/proto1/proto1-schematics.png) 
 
@@ -77,7 +79,7 @@ In parallel, I ordered the required chips and parts from Mouser; luckily I had g
 
 ![Failed Prototype 1 Board](pics/proto1/failed-prototypes.jpg) 
 
-It turned out I had made a number of critical mistakes in designing the boards: all of the voltage translators' OE pins were tied to GND when they should have had 3.3V, so they required manual bending and patching of the OE leg (yellow cables in the picture). I accidentally switched 3.3V and GND pins on the FPGA carrier headers, so I needed to reroute them with wires on the back. Because I misinterpreted the Multiplexer IC's datasheet, I also planned for a negating Logic IC on their SEL pins which was totaly wrong. In the end I had to solder bridges instead of placing the 74LS04. 
+It turned out I had made a number of critical mistakes in designing the boards: all of the voltage translators' OE pins were tied to GND when they should have had 3.3V, so they required manual bending and patching of the OE leg (yellow cables in the picture). I accidentally switched 3.3V and GND pins on the FPGA carrier headers, so I needed to reroute them with wires on the back. Because I misinterpreted the Multiplexer IC's datasheet, I also planned for a negating logic IC on their SEL pins which was totaly wrong. In the end I had to solder bridges instead of placing the 74LS04. 
 
 After fighting through all of these issues and burning through a few boards, I finally gut some results. As a first debugging step, I wrote a poor man's logic analyzer in Verilog that would record 640 cycles of all the Zorro Bus signals to FPGA registers (BRAM) and dump them as colorful lines on the VGA screen. This turned out to be a helpful instrument. I wrote a very simple program in 68k assembler for the Amiga that would read – in an endless loop – a word from address $e80000 and write it to $dff180 (a background color register). I made a boot floppy that would run the program, put my card in the A2000, flashed the code and turned everything on.
 
