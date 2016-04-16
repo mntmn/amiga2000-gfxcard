@@ -1,3 +1,15 @@
+<h1>MNT VA2000, an Amiga 2000 Graphics Card (Zorro II)</h1>
+
+<p>This repository contains my Kicad schematics and Xilinx ISE/Verilog files for my graphics card project. This is a work in progress, started in October 2015. The first 4 prototypes were assembled in Jan/Feb 2016 and had noise problems, so I started a redesign on Feb 13, 2016.</p>
+
+<p>On Mar 27th, 2016, the redesign worked and I could load a 16 bit 565BGR coded raw image from floppy into the graphics card that displayed a 1280x720p resolution (75mhz pixelclock).</p>
+
+<p>In April 2016, I managed to get Workbench running via a reverse engineered Picasso96 driver.</p>
+
+<p>The working Xilinx project for the new target platform (Scarab miniSpartan 6+) is now in the z2-minispartan folder.</p>
+
+<p>Contains a modified SDRAM controller (Verilog) and a DVI encoder (VHDL) by Mike Field. See credits and license at the end.</p>
+
 <h1>How I decided to make a graphics card for my Amiga 2000</h1>
 
 <p><em>TL;DR: I spent my free time over the course of 5 months to make two open source graphics card prototypes for the Amiga 2000. I will make a third, release version; details at the end.</em></p>
@@ -100,7 +112,8 @@
 
 <p>To my surprise, using the "dragging" technique with plenty of flux and a chisel tip (Sparky recommends a "gullwing" tip) at around 270 Celsius yielded the cleanest results I had so far.</p>
 
-<p><img src="pics/proto2/proto2-smd-soldering.jpg" alt="Drag Soldered Voltage Translators" title="" /></p>
+<p><img src="pics/proto2/proto2-smd-soldering.jpg" alt="Drag Soldered Voltage Translators" title="" />
+<img src="pics/proto2/proto2-in-amiga2000.jpg" alt="Prototype 2 inserted into Amiga 2000" title="" /></p>
 
 <p>Version 2 rewarded me with super clean signals. I used 5 digital outputs of the FPGA and connected them to a VGA monitor for testing, and I could reliably "lock" my Verilog state machine to the Zorro READ cycles. </p>
 
@@ -186,10 +199,13 @@
 
 <p>By changing the list of supported color modes in my driver to a non-PC-mode (RGB565), I was able to fix the problem and enjoy "High Color" in 800x600 on my Amiga 2000:</p>
 
-<p><img src="pics/proto2/proto2-hicolor.jpg" alt="Prototype 2 Amiga HiColor Triangle" title="" />
+<p><img src="pics/proto2/proto2-hicolor.jpg" alt="Prototype 2 Amiga HiColor Triangle XiPaint" title="" />
 <img src="pics/proto2/proto2-wb-hicolor.jpg" alt="Prototype 2 Workbench 65535 Colors" title="" />
-<img src="pics/proto2/proto2-jpeg.jpg" alt="Prototype 2 Workbench 65535 Colors" title="" />
-<img src="pics/proto2/proto2-doom-amiga.jpg" alt="Prototype 2 Workbench 65535 Colors" title="" /></p>
+<img src="pics/proto2/proto2-jpeg.jpg" alt="Prototype 2 Workbench 65535 Colors" title="" /></p>
+
+<p>Obligatory shot of Doom:</p>
+
+<p><img src="pics/proto2/proto2-doom-amiga.jpg" alt="Prototype 2 Workbench 65535 Colors" title="" /></p>
 
 <h2>TODO</h2>
 
@@ -204,7 +220,7 @@
 <li>Design a proper metal slot plate for connectors</li>
 </ul>
 
-<h2>How can to get or buy the VA2000 board?</h2>
+<h2>How can I build or buy a VA2000 board?</h2>
 
 <p>I still have to finish the "release" version of the board including the above fixes. I plan to offer preassembled versions and/or construction kits at reasonable prices. If you want to reserve a board, please send me an email to lukas@mntmn.com including "VA2000" in the subject.</p>
 
@@ -214,16 +230,28 @@
 
 <p>Special thanks to Martin Åberg for sharing his "GRETA" Amiga 500 expansion sources (https://github.com/endofexclusive/greta). It inspired me to include bus signal synchronizers and helped with AUTOCONF.</p>
 
-<p>Mike Field's SDRAM and HDMI sources saved me a lot of time:
+<p>Special thanks to Mike Field, his SDRAM and HDMI sources saved me a lot of time:
 - http://hamsterworks.co.nz/mediawiki/index.php/Simple<em>SDRAM</em>Controller
 - http://hamsterworks.co.nz/mediawiki/index.php/Dvid_test</p>
 
 <p>Amiga Hardware Manual: http://amigadev.elowar.com/read/ADCD<em>2.1/Hardware</em>Manual_guide/node0000.html</p>
 
-<p>Thanks to the CommodoreAmiga group on Facebook for inspiration and motivation!</p>
+<p>KiCad Open Source Super Awesome EDA: http://kicad-pcb.org</p>
+
+<p>Thanks to the CommodoreAmiga group on Facebook and thanks to Sebastian Hartmann, Adrian Kaiser, Daniel Zahn, Greta Melnik for inspiration and motivation.</p>
+
+<p>Greetings to kipper2k/majsta/BigGun over at the Vampire project!</p>
+
+<h2>Copyright / License</h2>
 
 <p>(C)2016 Lukas F. Hartmann (@mntmn) / MNT Media and Technology UG.
 http://mntmn.com
 https://twitter.com/mntmn</p>
+
+<p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+
+<p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+
+<p>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
 
 <p><img src="pics/proto2/tina-helping.jpg" alt="My dog Tina helping me" title="" /></p>
