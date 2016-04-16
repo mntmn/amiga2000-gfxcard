@@ -200,6 +200,9 @@ By changing the list of supported color modes in my driver to a non-PC-mode (RGB
 
 ![Prototype 2 Amiga HiColor Triangle XiPaint](pics/proto2/proto2-hicolor.jpg)
 ![Prototype 2 Workbench 65535 Colors](pics/proto2/proto2-wb-hicolor.jpg)
+
+UniView displaying a JPEG (from Hood By Air show):
+
 ![Prototype 2 Workbench 65535 Colors](pics/proto2/proto2-jpeg.jpg)
 
 Obligatory shot of Doom:
