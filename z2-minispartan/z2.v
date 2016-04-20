@@ -216,7 +216,8 @@ parameter WAIT_READ = 1;
 parameter WAIT_WRITE = 2;
 parameter WAIT_READ_ROM = 4;
 parameter WAIT_WRITE2 = 8;
-parameter WAIT_READ2 = 16;
+parameter WAIT_PREREAD = 16;
+parameter WAIT_PREREAD2 = 17;
 
 parameter ram_low  = 24'h600000;
 parameter ram_high = 24'h740000;
@@ -225,6 +226,12 @@ parameter rom_high = 24'he80100;
 
 reg [4:0] wdelay = 0; // write switchoff delay
 reg [4:0] read_delay = 0;
+
+reg [15:0] wait_read_counter = 0;
+reg [15:0] wait_ram_counter = 0;
+reg [3:0] ram_done = 0;
+reg fetch_resume = 0;
+
 /*
 parameter rec_depth = 16;
 
@@ -282,14 +289,19 @@ always @(posedge z_sample_clk) begin
         dataout <= 0;
         data <= 'hffff;
         
-        ram_write <= 0;
-        ram_addr <= ((zaddr&'h1ffffe)>>1);
-        ram_enable <= 1;
-        ram_byte_enable <= 'b11;
-        fetching <= 0;
+        wait_read_counter <= 0;
+        wait_ram_counter <= 0;
+        ram_done <= 0;
+        fetch_resume <= 0;
+        ram_enable <= 0;
         
-        state <= WAIT_READ;
-                
+        if (fetching) begin
+          fetching <= 0;
+          state <= WAIT_PREREAD;
+          read_delay <= 2;
+        end else
+          state <= WAIT_PREREAD2;
+        
       end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
         // read iospace 'he80000 (ROM)
         dataout_enable <= 1;
@@ -327,7 +339,7 @@ always @(posedge z_sample_clk) begin
       end else
         dataout <= 0;
       
-    end else if (!row_fetched && !fetching && counter_y<600 && ((writeq_fill-writeq_drain)<1000) ) begin
+    end else if (!row_fetched && !fetching && !fetch_resume && counter_y<600 && ((writeq_fill-writeq_drain)<1000) ) begin
       // fetch video pixels for current row as quickly as possible
       
       dataout <= 0;
@@ -340,21 +352,56 @@ always @(posedge z_sample_clk) begin
     end else
       dataout <= 0;
   
-  end else if (state == WAIT_READ) begin
-    if (data_out_ready) begin
-      last_data <= ram_data_out[15:0];
+  end else if (state == WAIT_PREREAD) begin
+    // wait for fetch abort
+    if (data_out_ready || read_delay==0)
+      state <= WAIT_PREREAD2;
+    else
+      read_delay <= read_delay - 1;
+    
+  end else if (state == WAIT_PREREAD2) begin
+    ram_write <= 0;
+    ram_addr <= ((last_addr&'h1ffffe)>>1);
+    ram_enable <= 1;
+    ram_byte_enable <= 'b1111;
+    ram_done <= 0;
+    
+    if (cmd_ready) begin      
+      state <= WAIT_READ;
     end
+    
+    // ram not ready on time, abort
+    if (znAS_sync[1]==1) begin
+      state <= IDLE;
+      dataout <= 0;
+      dataout_enable <= 0;
+    end
+  
+  end else if (state == WAIT_READ) begin
+    
+    if (data_out_ready && ram_done<2) begin
+      ram_done <= ram_done + 1;
+      wait_ram_counter <= wait_read_counter;
+      last_data <= ram_data_out;
+    end
+    
+    if (!row_fetched && counter_y<600 && ram_done==2) begin
+      ram_enable <= 0;
+      fetching <= 1;
+      fetch_resume <= 1;
+    end
+    
+    //if (!ram_done && !data_out_ready)
+      //last_data <= (wait_ram_counter<<8)|wait_read_counter; //ram_data_out[15:0];
+    //  last_data <= 'hffff;
+    
+    wait_read_counter <= wait_read_counter + 1;
     
     if (znAS_sync[1]==1) begin
       state <= IDLE;
       dataout <= 0;
       dataout_enable <= 0;
-      ram_enable <= 0;
-      if (!row_fetched) begin
-        fetching <= 1;
-        //fetch_x <= fetch_x + 16;
-      end
-    end else begin
+    end else if (ram_done>0) begin
       dataout <= 1;
       dataout_enable <= 1;
       data <= last_data;
@@ -403,11 +450,15 @@ always @(posedge z_sample_clk) begin
   end
   
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))
-      || state == WAIT_WRITE2) begin
-    if (fetching && cmd_ready && (data_out_ready || fetch_x==0) && state!=WAIT_READ2) begin
-      ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+      || state == WAIT_WRITE2 || (state == WAIT_READ && ram_done==2)) begin
+    if (fetching && cmd_ready && (data_out_ready || fetch_x==0 || fetch_resume)) begin
+      fetch_resume <= 0;
       
-      fetch_x <= fetch_x + 1;
+      if (data_out_ready) begin
+        ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+        fetch_x <= fetch_x + 1;
+      end
+      
       if (fetch_x > screen_w) begin
         fetching <= 0;
         fetch_x  <= 0;
@@ -684,7 +735,7 @@ always @(posedge vga_clk) begin
           rgb <= 0;
         end
       else begin
-        if (counter_x>=(screen_w+240) || counter_x<240)
+        if (counter_x>=(screen_w+240) || counter_x<240 || counter_y>600)
           rgb <= 0;
         
         /*else if (counter_x<rec_depth) begin
