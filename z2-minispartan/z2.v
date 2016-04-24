@@ -233,6 +233,7 @@ reg [4:0] read_delay = 0;
 
 reg [4:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
+reg [7:0] read_to_fetch_time = 'h20;
 
 // registers
 reg display_enable = 1;
@@ -305,6 +306,7 @@ always @(posedge z_sample_clk) begin
         if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
           case (zaddr & 'h0000ff)
             'h00: display_enable <= data_in[0];
+            'h02: read_to_fetch_time <= data_in[7:0];
           endcase
         end
        
@@ -348,19 +350,29 @@ always @(posedge z_sample_clk) begin
     end*/
     
   end else if (state == WAIT_READ) begin
-    fetch_delay <= 3;
     read_counter <= read_counter + 1;
     dataout_enable <= 1;
     dataout <= 1;
     
-    ram_write <= 0;
-    ram_addr <= ((zaddr&'h1ffffe)>>1);
-    ram_enable <= 1;
-    ram_byte_enable <= 'b11;
-    
-    if (data_out_ready) begin
-      last_data <= ram_data_out[15:0];
+    // todo put this number in a register for tuning
+    if (read_counter<read_to_fetch_time) begin
+      ram_enable <= 1;
+      ram_write <= 0;
+      ram_addr <= ((zaddr&'h1ffffe)>>1);
+      ram_byte_enable <= 'b11;
+      
+      if (data_out_ready) begin
+        last_data <= ram_data_out[15:0];
+      end
+    end else if (read_counter==read_to_fetch_time) begin
+      ram_enable <= 0;
+      if (!row_fetched && display_enable) begin
+        // resume fetching
+        fetching <= 1;
+        fetch_delay <= 3;
+      end
     end
+    
     data <= last_data;
     
     if (znAS_sync[1]==1) begin
@@ -369,9 +381,6 @@ always @(posedge z_sample_clk) begin
       dataout_enable <= 0;
       slaven <= 0;
       ram_enable <= 0;
-      if (!row_fetched && display_enable) begin
-        fetching <= 1;
-      end
     end else begin
       //if (read_counter>'h17) begin
         slaven <= 1;
@@ -415,11 +424,11 @@ always @(posedge z_sample_clk) begin
   end
   
   if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))
-      || state == WAIT_WRITE2) begin
-    if (fetching && cmd_ready && state!=WAIT_READ2) begin // && (data_out_ready || fetch_x==0)
-      ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+      || state == WAIT_WRITE2 || (state == WAIT_READ && read_counter>read_to_fetch_time)) begin
+    if (fetching && cmd_ready) begin // && (data_out_ready || fetch_x==0)
       
       if (fetch_delay<1) begin
+        ram_data_buffer[fetch_x] <= ram_data_out[15:0];
         fetch_x <= fetch_x + 1;
         if (fetch_x > screen_w) begin
           fetching <= 0;
