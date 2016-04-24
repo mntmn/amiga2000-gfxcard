@@ -47,7 +47,7 @@ module SDRAM_Controller_v (
    parameter sdram_row_bits = 13;
    parameter sdram_address_width  = 24;    // zzz
    parameter sdram_startup_cycles = 10100; // -- 100us, plus a little more, @ 100MHz
-   parameter cycles_per_refresh   = 780; //1524;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
+   parameter cycles_per_refresh   = 1524;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
    
    input  clk;
    input  reset;
@@ -145,8 +145,8 @@ module SDRAM_Controller_v (
    // Indicate the need to refresh when the counter is 2048,
    // Force a refresh when the counter is 4096 - (if a refresh is forced, 
    // multiple refresshes will be forced until the counter is below 2048
-   wire pending_refresh = startup_refresh_count[11];  
-   wire forcing_refresh = startup_refresh_count[12];  
+   wire pending_refresh = 0; //startup_refresh_count[11];  
+   wire forcing_refresh = 0; //startup_refresh_count[12];  
 
    // The incoming address is split into these three values
    wire [12:0] addr_row;
