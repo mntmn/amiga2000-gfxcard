@@ -25,6 +25,7 @@ input CLK50,
 input znCFGIN,
 //output znCFGOUT,
 output znSLAVEN,
+output zXRDY,
 input znBERR,
 input znRST,
 input zE7M,
@@ -40,13 +41,6 @@ input [23:0] zA,
 // data bus
 output zDIR,
 inout [15:0] zD,
-
-// vga debug out
-/*output vgaR,
-output vgaG,
-output vgaB,
-output vgaVSync,
-output vgaHSync,*/
 
 // leds
 output reg [7:0] LEDS,
@@ -90,10 +84,13 @@ wire data_out_ready;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:screen_w]; // 1024x16bit line buffer
+reg  [15:0] ram_data_buffer [0:screen_w]; // 16bpp line buffer
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
+
+reg z_ready = 'bZ;
+assign zXRDY = z_ready;
 
 // SDRAM
 SDRAM_Controller_v sdram(
@@ -160,7 +157,6 @@ assign sdram_reset = 0;
 // vga registers
 reg [11:0] counter_x = 0;
 reg [11:0] counter_y = 0;
-//reg [11:0] counter_frame;
 
 parameter h_rez        = 1280;
 parameter h_sync_start = h_rez+72;
@@ -189,6 +185,7 @@ assign znSLAVEN = !(dataout && slaven);
 assign zD  = (dataout) ? data : 16'bzzzz_zzzz_zzzz_zzzz;
 
 reg [23:0] last_addr = 0;
+reg [23:0] last_read_addr = 0;
 reg [15:0] last_data = 0;
 reg [15:0] last_read_data = 0;
 
@@ -196,7 +193,7 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 1000;
+parameter max_fill = 64;
 parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
@@ -229,19 +226,19 @@ parameter reg_high = 24'h750100;
 parameter rom_low  = 24'he80000;
 parameter rom_high = 24'he80100;
 
-reg [7:0] wdelay = 2; // write switchoff delay
-
 reg [7:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
-reg [7:0] fetch_delay_value = 'h07;
-reg [7:0] read_to_fetch_time = 'h2c; // 750002
+reg [7:0] fetch_delay_value = 'h09; // 750004
 reg [7:0] margin_x = 240;
-reg [7:0] wdelay_max = 2;
-reg [7:0] slaven_time = 'h00; // 75000c   23?
-reg [7:0] dataout_time = 'h0f; // 75000a
+
+reg [7:0] dataout_time = 'h03; // 75000a
+reg [7:0] slaven_time = 'h03; // 75000c
+reg [7:0] zready_time = 'h23; // 75000e
+reg [7:0] read_to_fetch_time = 'h2c; // 750002
 
 // registers
 reg display_enable = 1;
+reg [7:0] fetch_preroll = 'h20;
 
 always @(posedge z_sample_clk) begin
   // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
@@ -254,7 +251,7 @@ always @(posedge z_sample_clk) begin
   
   data_in <= zD;
   zaddr <= zA;
-   
+  
   if (state == IDLE) begin
     dataout <= 0;
     dataout_enable <= 0;
@@ -267,18 +264,15 @@ always @(posedge z_sample_clk) begin
         // read RAM
 
         last_addr <= zaddr;
+        last_read_addr <= zaddr;
         dataout <= 0;
-        data <= 'h0000;
-        last_read_data <= 'h0000;
-        fetching <= 0;
+        data <= 'hffff;
+        last_read_data <= 'hffff;
         read_counter <= 0;
         
-        if (wdelay<wdelay_max) begin
-          wdelay <= wdelay+1;
-        end
-        
+        z_ready <= 0;
         state <= WAIT_READ2;
-      
+        
       end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
         // read iospace 'he80000 (ROM)
         dataout_enable <= 1;
@@ -315,9 +309,10 @@ always @(posedge z_sample_clk) begin
             'h02: read_to_fetch_time <= data_in[7:0];
             'h04: fetch_delay_value <= data_in[7:0];
             'h06: margin_x <= data_in[7:0];
-            'h08: wdelay_max <= data_in[7:0];
+            'h08: fetch_preroll <= data_in[7:0];
             'h0a: dataout_time <= data_in[7:0];
             'h0c: slaven_time <= data_in[7:0];
+            'h0e: zready_time <= data_in[7:0];
           endcase
         end
        
@@ -331,61 +326,38 @@ always @(posedge z_sample_clk) begin
       end else
         dataout <= 0;
       
-    end else if (display_enable && !row_fetched && !fetching && counter_y<screen_h) begin
-      // fetch video pixels for current row as quickly as possible
-      
-      dataout <= 0;
-      fetching <= 1;
-      fetch_delay <= fetch_delay_value;
-      fetch_x <= 0;
     end else
       dataout <= 0;
   
   end else if (state == WAIT_READ2) begin
-    if (wdelay>=wdelay_max-1) begin
-      ram_write <= 0;
-      ram_addr <= ((zaddr&'h1ffffe)>>1);
-      ram_enable <= 1;
-      ram_byte_enable <= 'b11;
+    if (!fetching && writeq_fill==0 && row_fetched && cmd_ready) begin
       state <= WAIT_READ;
-      
-    end else if (wdelay<wdelay_max) begin
-      wdelay <= wdelay+1;
+      read_counter <= 0;
     end
-    fetching <= 0;
   
-    /*if (znAS_sync[1]==1) begin
-      state <= IDLE;
-      dataout <= 0;
-      dataout_enable <= 0;
-      ram_enable <= 0;
-    end*/
-    
   end else if (state == WAIT_READ) begin
-    wdelay <= wdelay_max;
     read_counter <= read_counter + 1;
     if (read_counter>=dataout_time) begin
       dataout_enable <= 1;
       dataout <= 1;
     end
+    if (read_counter>=slaven_time) begin
+      slaven <= 1;
+    end
+    if (read_counter>=zready_time) begin
+      z_ready <= 'bZ;
+    end
     
     if (read_counter<read_to_fetch_time) begin
-      fetching <= 0;
       ram_enable <= 1;
       ram_write <= 0;
-      ram_addr <= ((zaddr&'h1ffffe)>>1);
+      ram_addr <= ((last_read_addr&'h1ffffe)>>1);
       ram_byte_enable <= 'b11;
       
       if (data_out_ready) begin
         last_read_data <= ram_data_out[15:0];
       end
     end else if (read_counter==read_to_fetch_time) begin
-      ram_enable <= 0;
-      if (!row_fetched && display_enable) begin
-        // resume fetching
-        fetching <= 1;
-        fetch_delay <= fetch_delay_value;
-      end
     end
     
     data <= last_read_data;
@@ -395,11 +367,7 @@ always @(posedge z_sample_clk) begin
       dataout <= 0;
       dataout_enable <= 0;
       slaven <= 0;
-      ram_enable <= 0;
-    end else begin
-      if (read_counter>=slaven_time) begin
-        slaven <= 1;
-      end
+      z_ready <= 'bZ;
     end
 
   end else if (state == WAIT_READ_ROM) begin
@@ -416,90 +384,86 @@ always @(posedge z_sample_clk) begin
    
   end else if (state == WAIT_WRITE) begin
     dataout <= 0;
+    dataout_enable <= 0;
+    
+    if (writeq_fill<max_fill-1) begin
+      // there is still room in the queue
+      z_ready <= 'bZ;
 
-    if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
-      //last_addr <= zaddr;
-      last_data <= data_in;
-      
-      writeq_addr[writeq_fill][q_msb:0] <= (last_addr&'h1ffffe)>>1;
-      writeq_addr[writeq_fill][lds_bit]   <= ~znLDS_sync[2];
-      writeq_addr[writeq_fill][uds_bit]   <= ~znUDS_sync[2];
-      writeq_data[writeq_fill]       <= data_in;
-      
-      if (writeq_fill<max_fill-1)
-        writeq_fill <= writeq_fill+1;
-      else
-        writeq_fill <= 0;
+      if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
+        last_data <= data_in;
         
-      state <= WAIT_WRITE2;
+        writeq_addr[writeq_fill][q_msb:0] <= (last_addr&'h1ffffe)>>1;
+        writeq_addr[writeq_fill][lds_bit]   <= ~znLDS_sync[2];
+        writeq_addr[writeq_fill][uds_bit]   <= ~znUDS_sync[2];
+        writeq_data[writeq_fill]       <= data_in;
+        
+        writeq_fill <= writeq_fill+1;
+          
+        state <= WAIT_WRITE2;
+      end
+    end else begin
+      z_ready <= 0;
     end
+    
   end else if (state == WAIT_WRITE2) begin
     dataout <= 0;
     if (znAS_sync[1]==1) state <= IDLE;
   end
   
-  // || state == WAIT_WRITE2 || state == WAIT_READ
-  if ((state == IDLE && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))) begin
+  //  && (!(zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) || znAS_sync[1]==1))
+  
+  if (state == WAIT_READ2 || state == WAIT_WRITE || state == WAIT_WRITE2 || state == IDLE ) begin
     if (fetching) begin
-      if (wdelay>=wdelay_max) begin
-        if (fetch_delay<1 && data_out_ready) begin
-          ram_data_buffer[fetch_x] <= ram_data_out[15:0];
-          fetch_x <= fetch_x + 1;
-          if (fetch_x > screen_w) begin
-            fetching <= 0;
-            fetch_x  <= 0;
-            row_fetched <= 1; // row completely fetched
-          end
+      if (fetch_delay<1 && data_out_ready) begin
+        ram_data_buffer[fetch_x] <= ram_data_out[15:0];
+        fetch_x <= fetch_x + 1;
+        if (fetch_x > screen_w) begin
+          fetching <= 0;
+          fetch_x  <= 0;
+          row_fetched <= 1; // row completely fetched
         end
-         
-        // read window
-        ram_addr  <= ((fetch_y << 10) + fetch_x);
-        ram_enable <= 1; // fetch next
-        ram_byte_enable <= 'b11;
-        ram_write <= 0;
-      end else
-        wdelay <= wdelay + 1;
+      end
+       
+      // read window
+      ram_addr  <= ((fetch_y << 10) + fetch_x);
+      ram_enable <= 1; // fetch next
+      ram_byte_enable <= 'b11;
+      ram_write <= 0;
     end
     
     if (fetching && fetch_delay>0) begin
       fetch_delay <= fetch_delay - 1;
     end
-
-    if (state == IDLE) begin
-      if (!fetching && cmd_ready && writeq_fill!=writeq_drain) begin
-        // write window
-        if (writeq_addr[writeq_drain][uds_bit] && !writeq_addr[writeq_drain][lds_bit])
+    
+    if (display_enable && !row_fetched && !fetching && counter_y<screen_h) begin
+      // fetch video pixels for current row as quickly as possible
+      
+      dataout <= 0;
+      fetching <= 1;
+      fetch_delay <= fetch_delay_value;
+      fetch_x <= 0;
+    end else if ((state == IDLE || state == WAIT_READ2) && !fetching && row_fetched) begin
+      // write window
+      if (cmd_ready && writeq_fill>0) begin
+        if (writeq_addr[writeq_fill-1][uds_bit] && !writeq_addr[writeq_fill-1][lds_bit])
           ram_byte_enable <= 'b10; // UDS
-        else if (writeq_addr[writeq_drain][lds_bit] && !writeq_addr[writeq_drain][uds_bit])
+        else if (writeq_addr[writeq_fill-1][lds_bit] && !writeq_addr[writeq_fill-1][uds_bit])
           ram_byte_enable <= 'b01; // LDS
         else
           ram_byte_enable <= 'b11;
         
-        ram_data_in <= (writeq_data[writeq_drain]);
-        ram_addr    <= (writeq_addr[writeq_drain][q_msb:0]);   
+        ram_data_in <= (writeq_data[writeq_fill-1]);
+        ram_addr    <= (writeq_addr[writeq_fill-1][q_msb:0]);   
         ram_write   <= 1;
         ram_enable  <= 1;
-        wdelay <= 0;
         
-        if (writeq_drain<max_fill-1)
-          writeq_drain <= writeq_drain+1;
-        else
-          writeq_drain <= 0;
-      end
-      
-      if (!fetching && (writeq_fill==writeq_drain)) begin
-        if (wdelay==wdelay_max-1) begin
-          ram_enable <= 0;
-          ram_write <= 0;
-          wdelay <= wdelay+1;
-        end else if (wdelay<wdelay_max) begin
-          wdelay <= wdelay+1;
-        end
+        writeq_fill <= writeq_fill-1;
       end
     end
   end
   
-  if (counter_x==h_max-200) begin
+  if (counter_x==h_max-fetch_preroll && counter_y<screen_h) begin
     row_fetched <= 0;
     fetch_x <= 0;
     fetch_y <= counter_y;
