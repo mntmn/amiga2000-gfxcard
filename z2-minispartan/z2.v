@@ -84,7 +84,7 @@ wire data_out_ready;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:screen_w]; // 16bpp line buffer
+reg  [15:0] ram_data_buffer [0:1023]; // 16bpp line buffer
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
@@ -157,6 +157,7 @@ assign sdram_reset = 0;
 // vga registers
 reg [11:0] counter_x = 0;
 reg [11:0] counter_y = 0;
+reg [11:0] display_x = 0;
 
 parameter h_rez        = 1280;
 parameter h_sync_start = h_rez+72;
@@ -193,7 +194,7 @@ reg host_reading = 0;
 reg write_clocked = 0;
 reg byte_ena_clocked = 0;
 
-parameter max_fill = 64;
+parameter max_fill = 256;
 parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
@@ -240,6 +241,10 @@ reg [7:0] read_to_fetch_time = 'h2c; // 750002
 reg display_enable = 1;
 reg [7:0] fetch_preroll = 'h20;
 
+reg [7:0]  glitch_reg = 'h09; // 750010
+reg [11:0] glitchx_reg = 'h203; // 750012
+reg [7:0]  glitch_offset = 8; // 750014
+
 always @(posedge z_sample_clk) begin
   // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
@@ -263,8 +268,8 @@ always @(posedge z_sample_clk) begin
       if (zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) begin
         // read RAM
 
-        last_addr <= zaddr;
-        last_read_addr <= zaddr;
+        //last_addr <= zaddr;
+        last_read_addr <= ((zaddr&'h1ffffe)>>1);
         dataout <= 0;
         data <= 'hffff;
         last_read_data <= 'hffff;
@@ -313,6 +318,9 @@ always @(posedge z_sample_clk) begin
             'h0a: dataout_time <= data_in[7:0];
             'h0c: slaven_time <= data_in[7:0];
             'h0e: zready_time <= data_in[7:0];
+            'h10: glitch_reg <= data_in[7:0];
+            'h12: glitchx_reg <= data_in[11:0];
+            'h14: glitch_offset <= data_in[7:0];
           endcase
         end
        
@@ -320,7 +328,12 @@ always @(posedge z_sample_clk) begin
         // write RAM
         
         dataout <= 0;
-        last_addr <= zaddr;
+        //last_addr <= zaddr;
+        
+        if ((((zaddr&'h1ffffe)>>1)&'h3ff) >= 'h200)
+          last_addr <= ((zaddr&'h1ffffe)>>1) + glitch_offset;
+        else
+          last_addr <= ((zaddr&'h1ffffe)>>1);
         
         state <= WAIT_WRITE;
       end else
@@ -351,7 +364,12 @@ always @(posedge z_sample_clk) begin
     if (read_counter<read_to_fetch_time) begin
       ram_enable <= 1;
       ram_write <= 0;
-      ram_addr <= ((last_read_addr&'h1ffffe)>>1);
+      
+      if ((last_read_addr&'h0003ff) >= 'h000200)
+        ram_addr <= (last_read_addr + glitch_offset);
+      else
+        ram_addr <= last_read_addr;
+    
       ram_byte_enable <= 'b11;
       
       if (data_out_ready) begin
@@ -392,11 +410,11 @@ always @(posedge z_sample_clk) begin
 
       if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
         last_data <= data_in;
-        
-        writeq_addr[writeq_fill][q_msb:0] <= (last_addr&'h1ffffe)>>1;
-        writeq_addr[writeq_fill][lds_bit]   <= ~znLDS_sync[2];
-        writeq_addr[writeq_fill][uds_bit]   <= ~znUDS_sync[2];
-        writeq_data[writeq_fill]       <= data_in;
+          
+        writeq_addr[writeq_fill][q_msb:0] <= last_addr;
+        writeq_addr[writeq_fill][lds_bit] <= ~znLDS_sync[2];
+        writeq_addr[writeq_fill][uds_bit] <= ~znUDS_sync[2];
+        writeq_data[writeq_fill]          <= data_in;
         
         writeq_fill <= writeq_fill+1;
           
@@ -418,6 +436,7 @@ always @(posedge z_sample_clk) begin
       if (fetch_delay<1 && data_out_ready) begin
         ram_data_buffer[fetch_x] <= ram_data_out[15:0];
         fetch_x <= fetch_x + 1;
+        
         if (fetch_x > screen_w) begin
           fetching <= 0;
           fetch_x  <= 0;
@@ -475,13 +494,21 @@ reg[15:0] rgb = 'h0000;
 always @(posedge vga_clk) begin
   if (counter_x >= h_max) begin
     counter_x <= 0;
+    display_x <= 0;
+    
     if (counter_y == v_max)
       counter_y <= 0;
     else
       counter_y <= counter_y + 1;
-  end else
+  end else begin
     counter_x <= counter_x + 1;
     
+    if (counter_x==margin_x+glitchx_reg)
+      display_x <= (display_x + glitch_reg);
+    else if (counter_x>=margin_x)
+      display_x <= display_x + 1;
+  end
+  
   if (counter_x>=h_sync_start && counter_x<h_sync_end)
     dvi_hsync <= 1;
   else
@@ -526,42 +553,14 @@ always @(posedge vga_clk) begin
   blue_p[6] <= rgb[14];
   blue_p[7] <= rgb[15];
 
-  /*blue_p[0] <= rgb[3];
-  blue_p[1] <= rgb[4];
-  blue_p[2] <= rgb[5];
-  blue_p[3] <= rgb[5];
-  blue_p[4] <= rgb[6];
-  blue_p[5] <= rgb[6];
-  blue_p[6] <= rgb[7];
-  blue_p[7] <= rgb[7];
-  
-  green_p[0] <= rgb[13];
-  green_p[1] <= rgb[14];
-  green_p[2] <= rgb[15];
-  green_p[3] <= rgb[0];
-  green_p[4] <= rgb[1];
-  green_p[5] <= rgb[1];
-  green_p[6] <= rgb[2];
-  green_p[7] <= rgb[2];
-  
-  red_p[0] <= rgb[8];
-  red_p[1] <= rgb[9];
-  red_p[2] <= rgb[10];
-  red_p[3] <= rgb[10];
-  red_p[4] <= rgb[11];  
-  red_p[5] <= rgb[11];
-  red_p[6] <= rgb[12];
-  red_p[7] <= rgb[12];*/
-
   LEDS <= 0;
-	//rgb <= 0;
   
   if (dvi_blank)
 	    rgb <= 0;
 	  else
       //rgb <= ram_data_buffer[counter_x];
       
-      if (counter_y>710) begin
+      /*if (counter_y>710) begin
         if (counter_x<210)
           rgb <= 0;
         else if (counter_x<220)
@@ -687,19 +686,12 @@ always @(posedge vga_clk) begin
         end else 
           rgb <= 0;
         end
-      else begin
+      else begin*/
         if ((counter_x>=(screen_w+margin_x) || counter_x<margin_x) || counter_y>=screen_h)
           rgb <= 0;
         else begin
-          // fight weird column swapping in this area
-          //if ((counter_x-margin_x)<764)
-            rgb <= ram_data_buffer[counter_x-margin_x+1];
-          /*else if ((counter_x-margin_x)>797)
-            rgb <= ram_data_buffer[(counter_x-margin_x)-36];
-          else
-            rgb <= ram_data_buffer[(counter_x-margin_x)+2];*/
+          rgb <= ram_data_buffer[display_x];
         end
-      end
 
 end
 
