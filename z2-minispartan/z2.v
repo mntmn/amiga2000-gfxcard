@@ -84,7 +84,7 @@ wire data_out_ready;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
-reg  [15:0] ram_data_buffer [0:1023]; // 16bpp line buffer
+reg  [15:0] ram_data_buffer [0:1299]; // 16bpp line buffer
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
@@ -169,11 +169,11 @@ parameter v_sync_start = v_rez+3;
 parameter v_sync_end   = v_rez+3+5;
 parameter v_max        = 749;
 
-parameter screen_w = 800;
-parameter screen_h = 600;
+parameter screen_w = 1280;
+parameter screen_h = 720;
 
 reg [23:0] zaddr;
-reg [23:0] zaddr2;
+reg [23:0] zaddr_sync;
 reg [15:0] data;
 reg [15:0] data_in;
 reg dataout = 0;
@@ -221,29 +221,33 @@ parameter WAIT_WRITE2 = 8;
 parameter WAIT_READ2 = 16;
 
 parameter ram_low  = 24'h600000;
-parameter ram_high = 24'h740000;
-parameter reg_low  = 24'h750000;
-parameter reg_high = 24'h750100;
+parameter ram_high = 24'h8d0000;
+parameter reg_low  = 24'h8f0000;
+parameter reg_high = 24'h8f0100;
 parameter rom_low  = 24'he80000;
 parameter rom_high = 24'he80100;
 
 reg [7:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
-reg [7:0] fetch_delay_value = 'h09; // 750004
-reg [7:0] margin_x = 240;
+reg [7:0] fetch_delay_value = 'h09; // 8f0004
+reg [7:0] margin_x = 0; // 8f0006
 
-reg [7:0] dataout_time = 'h03; // 75000a
-reg [7:0] slaven_time = 'h03; // 75000c
-reg [7:0] zready_time = 'h23; // 75000e
-reg [7:0] read_to_fetch_time = 'h2c; // 750002
+reg [7:0] dataout_time = 'h03; // 8f000a
+reg [7:0] slaven_time = 'h03; // 8f000c
+reg [7:0] zready_time = 'h23; // 8f000e
+reg [7:0] read_to_fetch_time = 'h2c; // 8f0002
 
 // registers
 reg display_enable = 1;
 reg [7:0] fetch_preroll = 'h20;
 
-reg [7:0]  glitch_reg = 'h09; // 750010
-reg [11:0] glitchx_reg = 'h203; // 750012
-reg [7:0]  glitch_offset = 8; // 750014
+reg [7:0]  glitch_reg = 'h09; // 8f0010
+reg [11:0] glitchx_reg = 'h1fe; // 'h203; // 8f0012
+reg [7:0]  glitch_offset = 8; // 8f0014
+reg [7:0]  negx_margin = 5; // 8f0016
+
+reg write_stall = 0;
+//reg [4:0] write_cooldown = 0;
 
 always @(posedge z_sample_clk) begin
   // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
@@ -256,20 +260,23 @@ always @(posedge z_sample_clk) begin
   
   data_in <= zD;
   zaddr <= zA;
+  zaddr_sync <= zaddr;
   
   if (state == IDLE) begin
     dataout <= 0;
     dataout_enable <= 0;
     slaven <= 0;
+    write_stall <= 0;
     
     if (znAS_sync[1]==0) begin
       // zorro gives us an address
       
-      if (zREAD_sync[1]==1 && zaddr>=ram_low && zaddr<ram_high) begin
+      if (zREAD_sync[1]==1 && zaddr_sync==zaddr && zaddr>=ram_low && zaddr<ram_high) begin
         // read RAM
 
         //last_addr <= zaddr;
-        last_read_addr <= ((zaddr&'h1ffffe)>>1);
+        last_read_addr <= ((zaddr_sync-ram_low)>>1);
+        dataout_enable <= 0;
         dataout <= 0;
         data <= 'hffff;
         last_read_data <= 'hffff;
@@ -321,6 +328,7 @@ always @(posedge z_sample_clk) begin
             'h10: glitch_reg <= data_in[7:0];
             'h12: glitchx_reg <= data_in[11:0];
             'h14: glitch_offset <= data_in[7:0];
+            'h16: negx_margin <= data_in[7:0];
           endcase
         end
        
@@ -330,10 +338,10 @@ always @(posedge z_sample_clk) begin
         dataout <= 0;
         //last_addr <= zaddr;
         
-        if ((((zaddr&'h1ffffe)>>1)&'h3ff) >= 'h200)
-          last_addr <= ((zaddr&'h1ffffe)>>1) + glitch_offset;
+        if ((((zaddr-ram_low)>>1)&'h3ff) >= 'h200)
+          last_addr <= ((zaddr-ram_low)>>1) + glitch_offset;
         else
-          last_addr <= ((zaddr&'h1ffffe)>>1);
+          last_addr <= ((zaddr-ram_low)>>1);
         
         state <= WAIT_WRITE;
       end else
@@ -343,42 +351,20 @@ always @(posedge z_sample_clk) begin
       dataout <= 0;
   
   end else if (state == WAIT_READ2) begin
-    if (!fetching && writeq_fill==0 && row_fetched && cmd_ready) begin
+  
+    if (znAS_sync[1]==1) begin
+      state <= IDLE;
+      dataout <= 0;
+      dataout_enable <= 0;
+      slaven <= 0;
+      z_ready <= 'bZ;
+    end else if (!fetching && writeq_fill==0 && row_fetched && cmd_ready) begin
       state <= WAIT_READ;
       read_counter <= 0;
     end
   
   end else if (state == WAIT_READ) begin
     read_counter <= read_counter + 1;
-    if (read_counter>=dataout_time) begin
-      dataout_enable <= 1;
-      dataout <= 1;
-    end
-    if (read_counter>=slaven_time) begin
-      slaven <= 1;
-    end
-    if (read_counter>=zready_time) begin
-      z_ready <= 'bZ;
-    end
-    
-    if (read_counter<read_to_fetch_time) begin
-      ram_enable <= 1;
-      ram_write <= 0;
-      
-      if ((last_read_addr&'h0003ff) >= 'h000200)
-        ram_addr <= (last_read_addr + glitch_offset);
-      else
-        ram_addr <= last_read_addr;
-    
-      ram_byte_enable <= 'b11;
-      
-      if (data_out_ready) begin
-        last_read_data <= ram_data_out[15:0];
-      end
-    end else if (read_counter==read_to_fetch_time) begin
-    end
-    
-    data <= last_read_data;
     
     if (znAS_sync[1]==1) begin
       state <= IDLE;
@@ -386,6 +372,35 @@ always @(posedge z_sample_clk) begin
       dataout_enable <= 0;
       slaven <= 0;
       z_ready <= 'bZ;
+    end else begin
+      if (read_counter>=dataout_time) begin
+        dataout_enable <= 1;
+        dataout <= 1;
+      end
+      if (read_counter>=slaven_time) begin
+        slaven <= 1;
+      end
+      if (read_counter>=zready_time) begin
+        z_ready <= 'bZ;
+      end
+      
+      if (read_counter<read_to_fetch_time) begin
+        //ram_enable <= 1;
+        ram_write <= 0;
+        
+        if ((last_read_addr&'h0003ff) >= 'h000200)
+          ram_addr <= (last_read_addr + glitch_offset);
+        else
+          ram_addr <= last_read_addr;
+      
+        ram_byte_enable <= 'b11;
+        
+        if (data_out_ready) begin
+          last_read_data <= ram_data_out[15:0];
+        end
+      end
+      
+      data <= last_read_data;
     end
 
   end else if (state == WAIT_READ_ROM) begin
@@ -404,9 +419,12 @@ always @(posedge z_sample_clk) begin
     dataout <= 0;
     dataout_enable <= 0;
     
+    // race conditions occur if writeq is mutated while read
+    
     if (writeq_fill<max_fill-1) begin
       // there is still room in the queue
       z_ready <= 'bZ;
+      write_stall <= 0;
 
       if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
         last_data <= data_in;
@@ -422,6 +440,7 @@ always @(posedge z_sample_clk) begin
       end
     end else begin
       z_ready <= 0;
+      write_stall <= 1;
     end
     
   end else if (state == WAIT_WRITE2) begin
@@ -445,7 +464,7 @@ always @(posedge z_sample_clk) begin
       end
        
       // read window
-      ram_addr  <= ((fetch_y << 10) + fetch_x);
+      ram_addr  <= ((fetch_y << 11) + fetch_x);
       ram_enable <= 1; // fetch next
       ram_byte_enable <= 'b11;
       ram_write <= 0;
@@ -462,7 +481,7 @@ always @(posedge z_sample_clk) begin
       fetching <= 1;
       fetch_delay <= fetch_delay_value;
       fetch_x <= 0;
-    end else if ((state == IDLE || state == WAIT_READ2) && !fetching && row_fetched) begin
+    end else if ((state == IDLE || state == WAIT_READ2 || (state == WAIT_WRITE && write_stall)) && !fetching && row_fetched) begin
       // write window
       if (cmd_ready && writeq_fill>0) begin
         if (writeq_addr[writeq_fill-1][uds_bit] && !writeq_addr[writeq_fill-1][lds_bit])
@@ -478,9 +497,13 @@ always @(posedge z_sample_clk) begin
         ram_enable  <= 1;
         
         writeq_fill <= writeq_fill-1;
+        
+        //write_cooldown <= 2;
       end
     end
   end
+  
+  //if (writeq_fill==0 && write_cooldown>0) write_cooldown <= write_cooldown-1;
   
   if (counter_x==h_max-fetch_preroll && counter_y<screen_h) begin
     row_fetched <= 0;
@@ -690,7 +713,7 @@ always @(posedge vga_clk) begin
         if ((counter_x>=(screen_w+margin_x) || counter_x<margin_x) || counter_y>=screen_h)
           rgb <= 0;
         else begin
-          rgb <= ram_data_buffer[display_x];
+          rgb <= ram_data_buffer[display_x+negx_margin];
         end
 
 end
