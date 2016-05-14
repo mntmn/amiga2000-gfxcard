@@ -23,7 +23,7 @@ input CLK50,
 
 // zorro
 input znCFGIN,
-//output znCFGOUT,
+output znCFGOUT,
 output znSLAVEN,
 output zXRDY,
 input znBERR,
@@ -42,8 +42,30 @@ input [23:0] zA,
 output zDIR,
 inout [15:0] zD,
 
+// video slot input
+input videoVS,
+input videoHS,
+input videoR3,
+input videoR2,
+input videoR1,
+input videoR0,
+input videoG3,
+input videoG2,
+input videoG1,
+input videoG0,
+//input videoB3,
+//input videoB2,
+input videoB1,
+input videoB0,
+
+// SD
+output SD_nCS,
+output SD_MOSI,
+input  SD_MISO,
+output SD_SCLK,
+
 // leds
-output reg [7:0] LEDS,
+output reg [7:0] LEDS = 0,
 
 // SDRAM
 output SDRAM_CLK,  
@@ -74,6 +96,42 @@ clk_wiz_v3_6 DCM(
   .CLK_OUT100(z_sample_clk),
   .CLK_OUT75(vga_clk)
 );
+
+reg sd_reset = 0;
+reg sd_read = 0;
+reg sd_write = 0;
+reg sd_continue = 0;
+
+reg [31:0] sd_addr_in = 0;
+reg [7:0] sd_data_in = 0;
+reg sd_handshake_in = 0;
+
+wire sd_busy;
+wire [7:0] sd_data_out;
+wire [15:0] sd_error;
+wire sd_handshake_out;
+
+SdCardCtrl sdcard(
+  .clk_i(z_sample_clk),
+  .reset_i(sd_reset),
+  .rd_i(sd_read),
+  .wr_i(sd_write),
+  .continue_i(sd_continue),
+  .addr_i(sd_addr_in),
+  .data_i(sd_data_in),
+  .data_o(sd_data_out),
+  .busy_o(sd_busy),
+  .error_o(sd_error),
+  
+  .cs_bo(SD_nCS),
+  .mosi_o(SD_MOSI),
+  .miso_i(SD_MISO),
+  .sclk_o(SD_SCLK),
+  
+  .hndShk_i(sd_handshake_in),
+  .hndShk_o(sd_handshake_out)
+);
+
 `endif
 
 wire sdram_reset;
@@ -88,6 +146,8 @@ reg  [15:0] ram_data_buffer [0:1299]; // 16bpp line buffer
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
+
+parameter capture_mode = 0;
 
 reg z_ready = 'bZ;
 assign zXRDY = z_ready;
@@ -220,12 +280,25 @@ parameter WAIT_READ_ROM = 4;
 parameter WAIT_WRITE2 = 8;
 parameter WAIT_READ2 = 16;
 
-parameter ram_low  = 24'h600000;
+// 'h300000 = 3MB
+
+/*parameter ram_low  = 24'h600000;
 parameter ram_high = 24'h8d0000;
 parameter reg_low  = 24'h8f0000;
-parameter reg_high = 24'h8f0100;
+parameter reg_high = 24'h8f0100;*/
+
 parameter rom_low  = 24'he80000;
-parameter rom_high = 24'he80100;
+parameter rom_high = 24'he80080;
+reg [23:0] ram_low  = 24'h600000;
+parameter ram_size = 24'h2d0000;
+parameter reg_base = 24'h2f0000;
+reg [23:0] ram_high = 24'h600000 + ram_size;
+reg [23:0] reg_low  = 24'h600000 + reg_base;
+reg [23:0] reg_high = 24'h600100 + reg_base;
+
+
+parameter io_low  = 24'hde0000;
+parameter io_high = 24'hde0010;
 
 reg [7:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
@@ -249,6 +322,18 @@ reg [7:0]  negx_margin = 5; // 8f0016
 reg write_stall = 0;
 //reg [4:0] write_cooldown = 0;
 
+// video capture regs
+reg[13:0] capture_x = 0;
+reg[13:0] capture_y = 0;
+reg[7:0] vvss = 1;
+reg video_synced = 0;
+reg [7:0] delay_lines = 0;
+reg [7:0] vsync_count = 0;
+reg [7:0] hsync_count = 0;
+
+reg z_confdone = 0;
+assign znCFGOUT = ~z_confdone;
+
 always @(posedge z_sample_clk) begin
   // synchronizers (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
@@ -261,6 +346,11 @@ always @(posedge z_sample_clk) begin
   data_in <= zD;
   zaddr <= zA;
   zaddr_sync <= zaddr;
+  
+  if (!znRST) begin
+    // system reset!
+    z_confdone <= 0;
+  end
   
   if (state == IDLE) begin
     dataout <= 0;
@@ -285,34 +375,69 @@ always @(posedge z_sample_clk) begin
         z_ready <= 0;
         state <= WAIT_READ2;
         
-      end else if (zREAD_sync[1]==1 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
+      end else if (zREAD_sync[1]==1 && ((zaddr>=rom_low && zaddr<rom_high && !znCFGIN && !z_confdone))) begin
         // read iospace 'he80000 (ROM)
+        
         dataout_enable <= 1;
         dataout <= 1;
         slaven <= 1;
         last_addr <= zaddr;
+        LEDS <= (zaddr & 'h0000ff);
         
         case (zaddr & 'h0000ff)
           'h000000: data <= 'b1100_0000_0000_0000; // zorro 2
-          'h000002: data <= 'b0111_0000_0000_0000; // 4mb, not linked
-          'h000004: data <= 'b0001_0000_0000_0000; // product number
-          'h000006: data <= 'b0111_0000_0000_0000; // (23)
-          'h000008: data <= 'b0100_0000_0000_0000; // flags
-          'h00000a: data <= 'b0000_0000_0000_0000; // sub size automatic
-          'h00000c: data <= 'b0000_0000_0000_0000; // reserved
-          'h00000e: data <= 'b0000_0000_0000_0000; // 
-          'h000010: data <= 'b0110_0000_0000_0000; // manufacturer high byte
+          'h000002: data <= 'b0111_0000_0000_0000; // 2mb
+          
+          'h000004: data <= 'b1111_0000_0000_0000; // product number
+          'h000006: data <= 'b1110_0000_0000_0000; // (23)
+          
+          'h000008: data <= 'b0011_0000_0000_0000; // flags inverted
+          'h00000a: data <= 'b1111_0000_0000_0000; // inverted zero
+          
+          'h000010: data <= 'b1111_0000_0000_0000; // manufacturer high byte inverted (02)
           'h000012: data <= 'b1101_0000_0000_0000; // 
-          'h000014: data <= 'b0110_0000_0000_0000; // manufacturer low byte
-          'h000016: data <= 'b1101_0000_0000_0000;
-          'h000018: data <= 'b0000_0000_0000_0000; // reserved
-          'h00001a: data <= 'b0000_0000_0000_0000; //
-          //'h000044: z_state <= Z_CONF_DONE;
+          'h000014: data <= 'b0110_0000_0000_0000; // manufacturer low byte (9a)
+          'h000016: data <= 'b0101_0000_0000_0000;
+          
+          'h000018: data <= 'b1111_0000_0000_0000; // serial
+          'h00001a: data <= 'b1110_0000_0000_0000; //
+          'h00001c: data <= 'b1111_0000_0000_0000; //
+          'h00001e: data <= 'b1110_0000_0000_0000; //
+          'h000020: data <= 'b1111_0000_0000_0000; //
+          'h000022: data <= 'b1110_0000_0000_0000; //
+          'h000024: data <= 'b1111_0000_0000_0000; //
+          'h000026: data <= 'b1110_0000_0000_0000; //
+          
+          'h000040: data <= 'b0000_0000_0000_0000; // interrupts (not inverted)
+          'h000042: data <= 'b0000_0000_0000_0000; //
          
-          default: data <= 'b0000_0000_0000_0000;	 
+          default: data <= 'b1111_0000_0000_0000;
         endcase
         state <= WAIT_READ_ROM;
         
+      end else if (zREAD_sync[1]==0 && zaddr>=rom_low && zaddr<rom_high && !znCFGIN) begin
+        // write to autoconfig register
+        if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
+          case (zaddr & 'h0000ff)
+            'h000048: begin
+              ram_low[23:20] <= data_in[15:12];
+              LEDS <= 'hff;
+            end
+            'h00004a: begin
+              ram_low[19:16] <= data_in[15:12];
+              ram_high  <= ram_low + ram_size;
+              reg_low   <= ram_low + reg_base;
+              reg_high  <= ram_low + reg_base + 'h100;
+              z_confdone <= 1;
+              LEDS <= 'hfe;
+            end
+            'h00004c: begin 
+              z_confdone <= 1;
+              LEDS <= 'hf0; // shut up register
+            end
+          endcase
+        end
+      
       end else if (zREAD_sync[1]==0 && zaddr>=reg_low && zaddr<reg_high) begin
         // write to register
         if ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
@@ -329,8 +454,43 @@ always @(posedge z_sample_clk) begin
             'h12: glitchx_reg <= data_in[11:0];
             'h14: glitch_offset <= data_in[7:0];
             'h16: negx_margin <= data_in[7:0];
+            
+            // sd card regs
+            'h30: sd_reset <= data_in[8];
+            'h32: sd_read <= data_in[8];
+            'h34: sd_write <= data_in[8];
+            'h36: sd_handshake_in <= data_in[8];
+            'h38: sd_addr_in[31:16] <= data_in[15:8];
+            'h3a: sd_addr_in[15:0] <= data_in[15:8];
+            'h3c: sd_data_in <= data_in[15:8];
           endcase
         end
+      end else if (zREAD_sync[1]==1 && zaddr>=reg_low && zaddr<reg_high) begin
+        // read from registers
+        
+        dataout_enable <= 1;
+        dataout <= 1;
+        slaven <= 1;
+        last_addr <= zaddr;
+        
+        case (zaddr & 'h0000ff)
+          'h20: data <= ram_low[23:16];
+          'h22: data <= ram_low[15:0];
+          'h24: data <= ram_high[23:16];
+          'h26: data <= ram_high[15:0];
+          
+          'h30: data <= sd_busy<<8;
+          'h32: data <= sd_read<<8;
+          'h34: data <= sd_write<<8;
+          'h36: data <= sd_handshake_out<<8;
+          'h38: data <= sd_addr_in[31:16];
+          'h3a: data <= sd_addr_in[15:0];
+          'h3c: data <= sd_data_in<<8;
+          'h3e: data <= sd_data_out<<8;
+          'h40: data <= sd_error;
+          
+          default: data <= 'h0000;
+        endcase
        
       end else if (zREAD_sync[1]==0 && zaddr>=ram_low && zaddr<ram_high) begin
         // write RAM
@@ -464,7 +624,12 @@ always @(posedge z_sample_clk) begin
       end
        
       // read window
-      ram_addr  <= ((fetch_y << 11) + fetch_x);
+      if (capture_mode) begin
+        // double every second line
+        ram_addr  <= (((fetch_y&'hfffe) << 11) + fetch_x);
+      end else begin
+        ram_addr  <= ((fetch_y << 11) + fetch_x);
+      end
       ram_enable <= 1; // fetch next
       ram_byte_enable <= 'b11;
       ram_write <= 0;
@@ -492,7 +657,7 @@ always @(posedge z_sample_clk) begin
           ram_byte_enable <= 'b11;
         
         ram_data_in <= (writeq_data[writeq_fill-1]);
-        ram_addr    <= (writeq_addr[writeq_fill-1][q_msb:0]);   
+        ram_addr    <= (writeq_addr[writeq_fill-1][q_msb:0]);
         ram_write   <= 1;
         ram_enable  <= 1;
         
@@ -500,6 +665,52 @@ always @(posedge z_sample_clk) begin
         
         //write_cooldown <= 2;
       end
+    end
+  end
+  
+  if (capture_mode) begin
+    if (!videoHS) begin
+      hsync_count <= hsync_count + 1;
+      if (hsync_count>50) begin
+        capture_x <= 0;
+        hsync_count <= 0;
+      end
+    end else begin
+      hsync_count <= 0;
+      capture_x <= capture_x + 1;
+      
+      if (capture_x == 1) begin
+        capture_y <= capture_y + 1;
+      end
+      
+      // FIXME no more space for videoB3, videoB2
+      if (!fetching && ((capture_x&'b111)==0) && capture_y>0) begin
+        ram_data_in <= {videoR3,videoR2,videoR1,videoR0,videoR0, videoG3,videoG2,videoG1,videoG0,videoG0,videoG0, videoB1,videoB1,videoB1,videoB0,videoB0};
+        ram_addr    <= (capture_y<<12)+(capture_x>>3);
+        ram_write   <= 1;
+        ram_enable  <= 1;
+      end
+    end
+    
+    vvss[7] <= vvss[6];
+    vvss[6] <= vvss[5];
+    vvss[5] <= vvss[4];
+    vvss[4] <= vvss[3];
+    vvss[3] <= vvss[2];
+    vvss[2] <= vvss[1];
+    vvss[1] <= vvss[0];
+    vvss[0] <= videoVS;
+    
+    if (vvss==0) begin
+      vsync_count <= vsync_count + 1;
+      if (vsync_count > 200) begin
+        capture_y <= 0;
+        video_synced <= 1;
+        vsync_count <= 0;
+      end
+    end else begin
+      video_synced <= 0;
+      vsync_count <= 0;
     end
   end
   
@@ -519,9 +730,9 @@ always @(posedge vga_clk) begin
     counter_x <= 0;
     display_x <= 0;
     
-    if (counter_y == v_max)
+    if (counter_y == v_max) begin
       counter_y <= 0;
-    else
+    end else
       counter_y <= counter_y + 1;
   end else begin
     counter_x <= counter_x + 1;
@@ -575,8 +786,6 @@ always @(posedge vga_clk) begin
   blue_p[5] <= rgb[13];
   blue_p[6] <= rgb[14];
   blue_p[7] <= rgb[15];
-
-  LEDS <= 0;
   
   if (dvi_blank)
 	    rgb <= 0;
@@ -713,7 +922,11 @@ always @(posedge vga_clk) begin
         if ((counter_x>=(screen_w+margin_x) || counter_x<margin_x) || counter_y>=screen_h)
           rgb <= 0;
         else begin
-          rgb <= ram_data_buffer[display_x+negx_margin];
+          if (capture_mode) begin
+            rgb <= ram_data_buffer[counter_x];
+          end else begin
+            rgb <= ram_data_buffer[display_x+negx_margin];
+          end
         end
 
 end
