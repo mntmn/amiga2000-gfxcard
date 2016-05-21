@@ -1,0 +1,234 @@
+/*
+ * Amiga RTG Compatibility Header
+ * Copyright (C) 2016, Lukas F. Hartmann <lukas@mntmn.com>
+ *
+ * Licensed under the MIT License:
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+#include	<exec/interrupts.h>
+#include	<exec/semaphores.h>
+#include	<graphics/gfx.h>
+
+#define int32 long
+#define int16 short
+#define int8  char
+
+#define uint32 unsigned long
+#define uint16 unsigned short
+#define uint8  unsigned char
+
+enum RTG_COLOR_MODES {
+  rtg_color_planar,
+  rtg_color_clut,
+  rtg_color_16bit,
+  rtg_color_24bit,
+  rtg_color_32bit
+};
+
+struct RTGBoard {
+  void* registers;
+  void* memory;
+  void* io;
+  
+  uint32 memory_size;
+  char* name;
+  char* unknown1;
+
+  void* self;
+  void* p1;
+  void* exec;
+  void* p2;
+
+  struct Interrupt int_hard;
+  struct Interrupt int_soft;
+  struct SignalSemaphore lock;
+  struct MinList resolutions;
+
+  uint32 type;
+  uint32 chip_type;
+  uint32 controller_type;
+  
+  uint16 monitor_switch;
+  uint16 bits_per_channel;
+  uint32 flags;
+  uint16 sprite_flags;
+  uint16 unknown2;
+  uint32 unknown3;
+
+  uint16 number;
+  uint16 color_formats;
+
+  uint16 max_bitmap_w_planar;
+  uint16 max_bitmap_w_clut;
+  uint16 max_bitmap_w_16bit;
+  uint16 max_bitmap_w_24bit;
+  uint16 max_bitmap_w_32bit;
+
+  uint16 max_bitmap_h_planar;
+  uint16 max_bitmap_h_clut;
+  uint16 max_bitmap_h_16bit;
+  uint16 max_bitmap_h_24bit;
+  uint16 max_bitmap_h_32bit;
+
+  uint16 max_res_w_planar;
+  uint16 max_res_w_clut;
+  uint16 max_res_w_16bit;
+  uint16 max_res_w_24bit;
+  uint16 max_res_w_32bit;
+
+  uint16 max_res_h_planar;
+  uint16 max_res_h_clut;
+  uint16 max_res_h_16bit;
+  uint16 max_res_h_24bit;
+  uint16 max_res_h_32bit;
+
+  uint32 max_alloc;
+  uint32 max_alloc_part;
+
+  uint32 clock_ram;
+  uint32 num_pixelclocks_planar;
+  uint32 num_pixelclocks_clut;
+  uint32 num_pixelclocks_16bit;
+  uint32 num_pixelclocks_24bit;
+  uint32 num_pixelclocks_32bit;
+
+  void* f1;
+  void* f2;
+  void* fn_monitor_switch;
+  void* fn_set_palette;
+  void* f5;
+  void* f6;
+  void* fn_pan;
+  void* fn_get_pitch;
+  void* f9;
+  void* fn_is_bitmap_compatible;
+  void* fn_enable_display;
+  void* fn_get_pixelclock_index;
+  void* fn_get_pixelclock;
+  void* f14;
+  void* f15;
+  void* f16;
+  void* f17;
+  void* f18;
+  void* fn_vsync_wait;
+  void* f20;
+  void* fn_blitter_wait;
+  void* f22;
+  void* f23;
+  void* f24;
+  void* f25;
+  void* fn_p2c;
+  void* fn_p2c_fallback;
+  void* fn_rect_fill;
+  void* fn_rect_fill_fallback;
+  void* fn_rect_invert;
+  void* fn_rect_invert_fallback;
+  void* fn_rect_copy;
+  void* fn_rect_copy_fallback;
+  void* f34;
+  void* f35;
+  void* fn_rect_pattern;
+  void* fn_rect_pattern_fallback;
+  void* fn_line;
+  void* fn_line_fallback;
+  void* f40;
+  void* f41;
+  void* f42;
+  void* f43;
+  void* f44;
+  void* f45;
+  void* f46;
+  void* f47;
+  void* f48;
+  void* f49;
+  void* f50;
+  void* f51;
+  void* f52;
+  void* f53;
+
+  void* fn_is_vsynced;
+  void* fn_get_current_y;
+  void* f56;
+  void* fn_reset;
+  void* f58;
+
+  void* fn_bitmap_alloc;
+  void* fn_bitmap_free;
+  void* fn_get_bitmap;
+
+  void* fn_sprite_setup;
+  void* fn_sprite_xy;
+  void* fn_sprite_bitmap;
+  void* fn_sprite_colors;
+
+  void* f66;
+  void* f67;
+  void* f68;
+
+  struct MinList unknown4;
+
+  struct ModeInfo* mode_info;
+
+  uint32 color_format;
+
+  int16 offset_x;
+  int16 offset_y;
+  uint8 color_depth;
+  uint8 mask_bg;
+  int16 border_enabled;
+  uint32 mask_fg;
+
+  uint8 palette[3*256];
+
+  struct ViewPort* current_viewport;
+  struct BitMap* current_bitmap;
+  struct BitMapExtra* current_bitmap_extra;
+  struct MinList bitmap_list;
+  struct MinList memory_list;
+
+  int16 cursor_x;
+  int16 cursor_y;
+  uint8 cursor_w;
+  uint8 cursor_h;
+  uint8 cursor_xo;
+  uint8 cursor_yo;
+
+  uint16* cursor_sprite_bitmap;
+  uint8 cursor_pen[4];
+  struct Rectangle cursor_rect;
+  uint8* cursor_clut_bitmap;
+  uint16* cursor_rendered_bitmap;
+  uint8* cursor_behind_buffer;
+
+  uint32 scratch[32];
+
+  void* memory2;
+  void* memory2_size;
+  void* unknown5;
+  uint32 vsync_seconds;
+  uint32 vsync_microseconds;
+  uint32 vsync_frame_microseconds;
+  struct MsgPort unknown6;
+  struct MinList unknown7;
+
+  int32 default_formats;
+};
+
