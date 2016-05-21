@@ -105,7 +105,7 @@ My new strategy was:
 1. Make the board much simpler, focus on voltage translation and find a FPGA board with enough IOs
 2. Get a decent (de-)soldering station and learn a better SMD soldering technique
 
-I shopped around the web for FPGA boards that combine SDRAM with lots of IO breakouts and found Scarab Hardware's miniSpartan6+, which has a nice small formfactor and includes two HDMI ports, a mini SD card reader and even an audio jack. Sadly, as of this writing, Scarab Hardware has disappeared from the web; waiting for my board to arrive took several months. For the final version, I plan to switch to the even more powerful Numato Labs Saturn.
+I shopped around the web for FPGA boards that combine SDRAM with lots of IO breakouts and found Scarab Hardware's miniSpartan6+, which has a nice small formfactor and includes two HDMI ports, a mini SD card reader and even an audio jack. 
 
 I redrew the schematics to include no more switches, different level shifters with explicit direction inputs (NXP 74LVC8T245), plenty of bypass capacitors and dropped the analog VGA circuit. 
 
