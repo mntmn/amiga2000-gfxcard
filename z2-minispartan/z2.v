@@ -138,6 +138,7 @@ reg  ram_enable = 0;
 reg  [23:0] ram_addr = 0;
 wire [15:0] ram_data_out;
 wire data_out_ready;
+wire data_out_queue_empty;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
 reg  [1:0]  ram_byte_enable;
@@ -168,6 +169,7 @@ SDRAM_Controller_v sdram(
   // Read data port
   .data_out(ram_data_out),
   .data_out_ready(data_out_ready),
+  .data_out_queue_empty(data_out_queue_empty),
 
   // signals
   .SDRAM_CLK(SDRAM_CLK),  
@@ -179,7 +181,7 @@ SDRAM_Controller_v sdram(
   .SDRAM_DATA(D),
   .SDRAM_ADDR(A),
   .SDRAM_DQM(SDRAM_DQM),
-  .SDRAM_BA(SDRAM_BA) 
+  .SDRAM_BA(SDRAM_BA)
 );
 
 reg [7:0] red_p;
@@ -649,7 +651,8 @@ always @(posedge z_sample_clk) begin
       fetch_x <= 0;
       if (row_fetched) begin
         ram_enable <= 0;
-        ram_arbiter_state <= RAM_ROW_FETCHED;
+        if (data_out_queue_empty)
+          ram_arbiter_state <= RAM_ROW_FETCHED;
       end else begin
         if (cmd_ready) begin
           ram_addr  <= ((fetch_y << 11) | fetch_x);
@@ -667,8 +670,8 @@ always @(posedge z_sample_clk) begin
         if (fetch_x >= screen_w) begin
           fetch_x  <= 0;
           row_fetched <= 1; // row completely fetched
-          ram_arbiter_state <= RAM_ROW_FETCHED;
           ram_enable <= 0;
+          ram_arbiter_state <= RAM_ROW_FETCHED;
         end else begin
           fetch_buffer[fetch_x] <= ram_data_out[15:0];
           
@@ -683,9 +686,8 @@ always @(posedge z_sample_clk) begin
       end
     RAM_ROW_FETCHED:
       if (!row_fetched) begin
-        ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
-      end else if (writeq_fill>0 && !zorro_ram_write_request) begin
+      end else if (writeq_fill>0) begin
         // process write queue
         if (cmd_ready) begin
           if (writeq_addr[writeq_fill-1][uds_bit] && !writeq_addr[writeq_fill-1][lds_bit])
@@ -721,7 +723,8 @@ always @(posedge z_sample_clk) begin
       end else if (zorro_ram_read_request) begin
         // process read request
         zorro_ram_read_done <= 0;
-        if (cmd_ready) begin
+        ram_enable <= 0;
+        if (cmd_ready && data_out_queue_empty) begin
           ram_write <= 0;
           ram_addr <= zorro_ram_read_addr;
           ram_byte_enable <= 'b11;
@@ -743,15 +746,20 @@ always @(posedge z_sample_clk) begin
           blitter_curx <= 0;
           blitter_cury <= 0;
           blitter_enable <= 0;
+          ram_enable <= 0;
         end
       end
       
-    RAM_READING_ZORRO: if (data_out_ready) begin
-        zorro_ram_read_data <= ram_data_out;
-        zorro_ram_read_done <= 1;
-        zorro_ram_read_request <= 0;
-        ram_arbiter_state <= RAM_ROW_FETCHED;
-      end     
+    RAM_READING_ZORRO: begin    
+        ram_enable <= 0;
+        if (data_out_ready) begin
+          zorro_ram_read_data <= ram_data_out;
+          zorro_ram_read_done <= 1;
+          zorro_ram_read_request <= 0;
+          ram_arbiter_state <= RAM_ROW_FETCHED;
+        end
+      end
+    
   endcase
   
   // decide when to fetch next row

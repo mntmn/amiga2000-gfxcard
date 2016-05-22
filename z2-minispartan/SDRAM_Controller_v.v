@@ -35,7 +35,7 @@ module SDRAM_Controller_v (
    // command and write port
    cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in,
    // Read data port
-   data_out, data_out_ready,
+   data_out, data_out_ready, data_out_queue_empty,
    // SDRAM signals
    SDRAM_CLK,  SDRAM_CKE,  SDRAM_CS,   SDRAM_RAS,  SDRAM_CAS,
    SDRAM_WE,   SDRAM_DQM,  SDRAM_ADDR, SDRAM_BA,   SDRAM_DATA
@@ -83,6 +83,9 @@ module SDRAM_Controller_v (
 
    reg data_out_ready_reg;
    output data_out_ready;     assign data_out_ready = data_out_ready_reg;
+   reg data_out_queue_empty_reg = 1;
+   output data_out_queue_empty; 
+   assign data_out_queue_empty = data_out_queue_empty_reg;
 
    output SDRAM_CLK;          // Assigned by a primative
    output SDRAM_CKE;          assign SDRAM_CKE = iob_cke;
@@ -93,7 +96,7 @@ module SDRAM_Controller_v (
    output [1:0]  SDRAM_DQM;   assign SDRAM_DQM  = iob_dqm;
    output [12:0] SDRAM_ADDR;  assign SDRAM_ADDR = iob_address;
    output [1:0]  SDRAM_BA;    assign SDRAM_BA   = iob_bank;
-   inout  [15:0] SDRAM_DATA;  // Assigned by a primative
+   inout  [15:0] SDRAM_DATA;  // Assigned by a primitive
 
    // From page 37 of MT48LC16M16A2 datasheet
    // Name (Function)       CS# RAS# CAS# WE# DQM  Addr    Data
@@ -168,8 +171,7 @@ module SDRAM_Controller_v (
    // control when new transactions are accepted 
    reg ready_for_new    = 1'b0;
    reg got_transaction  = 1'b0;
-   reg can_back_to_back = 1'b0; 
-
+   
    // signal to control the Hi-Z state of the DQ bus
    reg iob_dq_hiz = 1'b0;
    
@@ -189,19 +191,16 @@ module SDRAM_Controller_v (
    parameter end_of_bank   = sdram_address_width-1;
    parameter prefresh_cmd  = 10;
 
-
    // tell the outside world when we can accept a new transaction;
    assign cmd_ready = ready_for_new;
    //--------------------------------------------------------------------------
    // Seperate the address into row / bank / address
    //--------------------------------------------------------------------------
-   //assign addr_row[12]                        = 1'b0;
    assign addr_row[end_of_row-start_of_row:0] = cmd_address[end_of_row:start_of_row];
    assign addr_bank                           = cmd_address[end_of_bank:start_of_bank];
    
    assign addr_col[12:sdram_column_bits]      = 4'b00;
    assign addr_col[sdram_column_bits-1:0]     = cmd_address[end_of_col:start_of_col];
-   //assign addr_col[0]                         = 1'b0;
    
    wire [15:0] sdram_data_wire; assign SDRAM_DATA = sdram_data_wire;
    //-----------------------------------------------------------
@@ -235,10 +234,12 @@ module SDRAM_Controller_v (
          .T(iob_dq_hiz)
       );
    end 
-     
-always  @ (posedge clk ) captured_data      <= sdram_din;
 
-always  @ (posedge clk )
+reg can_back_to_back = 0;
+
+always @(posedge clk) captured_data <= sdram_din;
+
+always @(posedge clk)
    begin
       //captured_data_last <= captured_data;
       
@@ -255,26 +256,30 @@ always  @ (posedge clk )
       startup_refresh_count <= startup_refresh_count+1;
                   
       //-------------------------------------------------------------------
-      //-- It we are ready for a new tranasction and one is being presented
+      //-- It we are ready for a new transaction and one is being presented
       //-- then accept it. Also remember what we are reading or writing,
       //-- and if it can be back-to-backed with the last transaction
       //-------------------------------------------------------------------
       if (ready_for_new == 1'b1 && cmd_enable == 1'b1) begin
-         //$display("%h r: %h c: %h",cmd_address,addr_row,addr_col);
-         
-         if(save_bank == addr_bank && save_row == addr_row) 
-            can_back_to_back <= 1'b1;
-         else
-            can_back_to_back <= 1'b0;
+        if(save_bank == addr_bank && save_row == addr_row) 
+          can_back_to_back <= 1'b1;
+        else
+          can_back_to_back <= 1'b0;
 
-         save_row         <= addr_row;
-         save_bank        <= addr_bank;
-         save_col         <= addr_col;
-         save_wr          <= cmd_wr; 
-         save_data_in     <= cmd_data_in;
-         save_byte_enable <= cmd_byte_enable;
-         got_transaction  <= 1'b1;
-         ready_for_new    <= 1'b0;
+        //$display("%h r: %h c: %h",cmd_address,addr_row,addr_col);
+        save_row         <= addr_row;
+        save_bank        <= addr_bank;
+        save_col         <= addr_col;
+        save_wr          <= cmd_wr; 
+        save_data_in     <= cmd_data_in;
+        save_byte_enable <= cmd_byte_enable;
+        got_transaction  <= 1'b1;
+        ready_for_new    <= 1'b0;
+      end
+      
+      // empty read queue if switched off
+      if (cmd_enable == 0) begin
+        data_ready_delay <= 0;
       end
 
       //------------------------------------------------
@@ -283,16 +288,20 @@ always  @ (posedge clk )
       //------------------------------------------------
       data_out_ready_reg <= 1'b0;
       if (data_ready_delay[0] == 1'b1) begin
-         data_out_reg       <= {captured_data, captured_data};
+         data_out_reg       <= captured_data;
          data_out_ready_reg <= 1'b1;
       end
+      
+      // no more bits in the queue?
+      if (data_ready_delay == 0)
+        data_out_queue_empty_reg <= 1;
+      else
+        data_out_queue_empty_reg <= 0;
          
       //----------------------------------------------------------------------------
       //-- update shift registers used to choose when to present data to/from memory
       //----------------------------------------------------------------------------
       data_ready_delay <= {1'b0, data_ready_delay[data_ready_delay_high:1]};
-      //iob_dqm       <= dqm_sr[1:0];
-      //dqm_sr        <= {2'b11, dqm_sr[dqm_sr_high:2]};
          
       case(state) 
          s_startup: begin
@@ -354,27 +363,13 @@ always  @ (posedge clk )
          s_idle_in_1: state <= s_idle;
 
          s_idle: begin
-               // Priority is to issue a refresh if one is outstanding
-               if (pending_refresh == 1'b1 || forcing_refresh == 1'b1) begin
-                  //------------------------------------------------------------------------
-                  //-- Start the refresh cycle. 
-                  //-- This tasks tRFC (66ns), so 6 idle cycles are needed @ 100MHz
-                  //------------------------------------------------------------------------
-                  state       <= s_idle_in_6;
-                  iob_command <= CMD_REFRESH;
-                  startup_refresh_count <= startup_refresh_count - cycles_per_refresh+1;
-               end
-               else if (got_transaction == 1'b1) begin
-                  //--------------------------------
-                  //-- Start the read or write cycle. 
-                  //-- First task is to open the row
-                  //--------------------------------
-                  state       <= s_open_in_2;
-                  iob_command <= CMD_ACTIVE;
-                  iob_address <= save_row;
-                  iob_bank    <= save_bank;
-               end               
-            end
+           if (got_transaction == 1'b1) begin
+              state       <= s_open_in_2;
+              iob_command <= CMD_ACTIVE;
+              iob_address <= save_row;
+              iob_bank    <= save_bank;
+           end               
+         end
          //--------------------------------------------
          //-- Opening the row ready for reads or writes
          //--------------------------------------------
@@ -383,10 +378,12 @@ always  @ (posedge clk )
          s_open_in_1: begin 
                // still waiting for row to open
                if(save_wr == 1'b1) begin
+                  // write
                   state       <= s_write_1;
                   iob_dq_hiz  <= 1'b0;
-                  iob_data    <= save_data_in[15:0]; // get the DQ bus out of HiZ early
+                  iob_data    <= save_data_in[15:0];
                end else begin
+                  // read
                   iob_dq_hiz  <= 1'b1;
                   state       <= s_read_1;
                end
@@ -402,19 +399,19 @@ always  @ (posedge clk )
                iob_command     <= CMD_READ;
                iob_address     <= save_col; 
                iob_bank        <= save_bank;
-               iob_address[prefresh_cmd] <= 1'b0; // A10 actually matters - it selects auto precharge
+               iob_address[prefresh_cmd] <= 1'b0; // A10: auto precharge
                
                // Schedule reading the data values off the bus
                data_ready_delay[data_ready_delay_high]   <= 1'b1;
                
-               // Set the data masks to read all bytes
+               // read all bytes
                iob_dqm     <= 2'b00;
-               //dqm_sr[1:0] <= 2'b00;
             end   
          s_read_2: begin
                state <= s_read_3;
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b0) begin 
+                     // read
                      state           <= s_read_1;
                      ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
                      got_transaction <= 1'b0;
@@ -423,8 +420,9 @@ always  @ (posedge clk )
             end   
          s_read_3: begin
                state <= s_read_4;
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b0) begin
+                     // read 
                      state           <= s_read_1;
                      ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
                      got_transaction <= 1'b0;
@@ -435,14 +433,14 @@ always  @ (posedge clk )
          s_read_4: begin
                state <= s_precharge;
                //-- can we do back-to-back read?
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b0) begin 
                      state           <= s_read_1;
                      ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
                      got_transaction <= 1'b0;
                   end
                   else
-                     state <= s_open_in_2; // we have to wait for the read data to come back before we switch the bus into HiZ
+                     state <= s_open_in_2;
                end
             end
          //------------------------------------------------------------------
@@ -452,19 +450,16 @@ always  @ (posedge clk )
                state                     <= s_write_2;
                iob_command               <= CMD_WRITE;
                iob_address               <= save_col; 
-               iob_address[prefresh_cmd] <= 1'b0; // A10 actually matters - it selects auto precharge
+               iob_address[prefresh_cmd] <= 1'b0;
                iob_bank                  <= save_bank;
-               iob_dqm                   <= ~ save_byte_enable[1:0];    
-               //dqm_sr[1:0]               <= ~ save_byte_enable[3:2];    
+               iob_dqm                   <= ~ save_byte_enable[1:0];      
                iob_data                  <= save_data_in[15:0];
-               //iob_data_next             <= save_data_in[31:16];
             end
          s_write_2: begin
             $display("w2 %h\t%h\t%h", save_bank, save_row, iob_address);
                state           <= s_write_3;
-               //iob_data        <= iob_data_next;
                // can we do a back-to-back write?
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b1) begin
                      $display("back-to-back write");
                      
@@ -480,7 +475,7 @@ always  @ (posedge clk )
          s_write_3: begin
                // must wait tRDL, hence the extra idle state
                //-- back to back transaction?
-               if (forcing_refresh == 1'b0 && got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b1) begin
                      // back-to-back write?
                      state           <= s_write_1;
