@@ -43,6 +43,21 @@ enum RTG_COLOR_MODES {
   rtg_color_32bit
 };
 
+#define RTG_COLOR_FORMAT_CLUT 1
+#define RTG_COLOR_FORMAT_RGB888 2
+#define RTG_COLOR_FORMAT_BGR888 4
+#define RTG_COLOR_FORMAT_RGB565_WEIRD1 8
+#define RTG_COLOR_FORMAT_RGB565_WEIRD2 16
+#define RTG_COLOR_FORMAT_ARGB 32
+#define RTG_COLOR_FORMAT_ABGR 64
+#define RTG_COLOR_FORMAT_RGBA 128
+#define RTG_COLOR_FORMAT_BGRA 256
+#define RTG_COLOR_FORMAT_RGB565 512
+#define RTG_COLOR_FORMAT_RGB555 1024
+#define RTG_COLOR_FORMAT_BGR565_WEIRD3 2048
+#define RTG_COLOR_FORMAT_BGR565_WEIRD4 4096
+
+
 struct RTGBoard {
   void* registers;
   void* memory;
@@ -61,6 +76,8 @@ struct RTGBoard {
   struct Interrupt int_soft;
   struct SignalSemaphore lock;
   struct MinList resolutions;
+
+  // device properties
 
   uint32 type;
   uint32 chip_type;
@@ -110,20 +127,22 @@ struct RTGBoard {
   uint32 num_pixelclocks_24bit;
   uint32 num_pixelclocks_32bit;
 
-  void* f1;
-  void* f2;
+  // driver defined function hooks
+  
+  void* fn_memory_alloc;
+  void* fn_memory_free;
   void* fn_monitor_switch;
   void* fn_set_palette;
-  void* f5;
-  void* f6;
+  void* fn_init_dac;
+  void* fn_init_chip;
   void* fn_pan;
   void* fn_get_pitch;
-  void* f9;
+  void* fn_map_address;
   void* fn_is_bitmap_compatible;
   void* fn_enable_display;
   void* fn_get_pixelclock_index;
   void* fn_get_pixelclock;
-  void* f14;
+  void* fn_set_clock;
   void* f15;
   void* f16;
   void* f17;
@@ -185,6 +204,8 @@ struct RTGBoard {
 
   struct MinList unknown4;
 
+  // runtime properties
+
   struct ModeInfo* mode_info;
 
   uint32 color_format;
@@ -193,7 +214,7 @@ struct RTGBoard {
   int16 offset_y;
   uint8 color_depth;
   uint8 mask_bg;
-  int16 border_enabled;
+  int16 border;
   uint32 mask_fg;
 
   uint8 palette[3*256];
@@ -221,7 +242,7 @@ struct RTGBoard {
   uint32 scratch[32];
 
   void* memory2;
-  void* memory2_size;
+  uint32 memory2_size;
   void* unknown5;
   uint32 vsync_seconds;
   uint32 vsync_microseconds;
