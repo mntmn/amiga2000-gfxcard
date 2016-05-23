@@ -255,6 +255,7 @@ assign zD  = (dataout) ? data : 16'bzzzz_zzzz_zzzz_zzzz;
 reg [1:0] znAS_sync  = 2'b11;
 reg [2:0] znUDS_sync = 3'b000;
 reg [2:0] znLDS_sync = 3'b000;
+reg [1:0] znRST_sync = 2'b11;
 reg [1:0] zREAD_sync = 2'b00;
 reg [1:0] zDOE_sync = 2'b00;
 reg [1:0] zE7M_sync = 2'b00;
@@ -266,11 +267,11 @@ reg [15:0] last_read_data = 0;
 
 // write queue
 
-parameter max_fill = 256;
+parameter max_fill = 255;
 parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
-reg [(q_msb+2):0] writeq_addr [0:max_fill-1]; // 21=uds 20=lds
+reg [(q_msb+2):0] writeq_addr [0:max_fill]; // 21=uds 20=lds
 reg [15:0] writeq_data [0:max_fill-1];
 reg [12:0] writeq_fill = 0;
 reg [12:0] writeq_drain = 0;
@@ -322,7 +323,6 @@ reg [10:0] blitter_curx = 0;
 reg [10:0] blitter_cury = 0;
 
 reg write_stall = 0;
-//reg [4:0] write_cooldown = 0;
 
 // video capture regs
 reg[13:0] capture_x = 0;
@@ -366,6 +366,7 @@ always @(posedge z_sample_clk) begin
   zREAD_sync  <= {zREAD_sync[0],zREAD};
   zDOE_sync   <= {zDOE_sync[0],zDOE};
   zE7M_sync   <= {zE7M_sync[0],zE7M};
+  znRST_sync  <= {znRST_sync[0],znRST};
   
   data_in <= zD;
   zdata_in_sync <= data_in;
@@ -385,7 +386,6 @@ reg [23:0] zorro_ram_write_addr;
 reg [15:0] zorro_ram_write_data;
 reg [1:0] zorro_ram_write_bytes;
 
-
 reg [4:0] ram_arbiter_state = 0;
 
 parameter RAM_READY = 0;
@@ -394,9 +394,20 @@ parameter RAM_ROW_FETCHED = 2;
 parameter RAM_READING_ZORRO = 3;
 parameter RAM_WRITING = 4;
 
+/*
+problem:
+read/write mix (block copy)
+
+- some zorro writes are not seen
+- or some zorro writes are not committed
+*/
+
 // =================================================================================
 // ZORRO MACHINE
 always @(posedge z_sample_clk) begin
+
+  LEDS <= zorro_state|(ram_arbiter_state<<5);
+
   case (zorro_state)
     RESET: begin
       dataout_enable <= 0;
@@ -412,8 +423,6 @@ always @(posedge z_sample_clk) begin
     end
     
     CONFIGURING: begin
-      blitter_rgb <= 'h5555;
-      blitter_enable <= 1;
       if (zaddr_autoconfig && !znCFGIN) begin
         if (zorro_read) begin
           // read iospace 'he80000 (Autoconfig ROM)
@@ -456,7 +465,6 @@ always @(posedge z_sample_clk) begin
             case (zaddr & 'h0000ff)
               'h000048: begin
                 ram_low[23:20] <= data_in[15:12];
-                LEDS <= 'hff;
               end
               'h00004a: begin
                 ram_low[19:16] <= data_in[15:12];
@@ -464,11 +472,9 @@ always @(posedge z_sample_clk) begin
                 reg_low   <= ram_low + reg_base;
                 reg_high  <= ram_low + reg_base + 'h100;
                 zorro_state <= CONFIGURED; // configured
-                LEDS <= 'hfe;
               end
               'h00004c: begin 
-                zorro_state <= CONFIGURED; // configured
-                LEDS <= 'hf0; // shut up register
+                zorro_state <= CONFIGURED; // configured, shut up
               end
             endcase
           end
@@ -482,7 +488,6 @@ always @(posedge z_sample_clk) begin
     end
       
     CONFIGURED: begin
-      LEDS <= 1;
       blitter_rgb <= 'hffff;
       blitter_enable <= 1;
       zorro_state <= IDLE;
@@ -496,19 +501,20 @@ always @(posedge z_sample_clk) begin
       write_stall <= 0;
       z_ready <= 1'bZ; // clear XRDY (cpu wait)
       
-      if (!znRST) begin
+      if (znRST_sync[1]==0) begin
         // system reset
-        zorro_state <= RESET;
+        //zorro_state <= RESET;
       end else if (znAS_sync[1]==0) begin
         if (zorro_read && zaddr_in_ram) begin
           // read RAM
           // request ram access from arbiter
-          zorro_ram_read_addr <= ((zaddr-ram_low)>>1);
+          zorro_ram_read_addr <= ((zaddr_sync-ram_low)>>1);
           zorro_ram_read_request <= 1;
           zorro_ram_read_done <= 0;
           data <= 'h5555;
-          dataout <= 1;
+          dataout <= 0;
           dataout_enable <= 1;
+          slaven <= 0;
           read_counter <= 0;
           
           z_ready <= 0;
@@ -517,11 +523,10 @@ always @(posedge z_sample_clk) begin
         end else if (zorro_write && zaddr_in_ram) begin
           // write RAM
           
-          last_addr <= ((zaddr-ram_low)>>1);
+          last_addr <= ((zaddr_sync-ram_low)>>1);
           zorro_state <= WAIT_WRITE;
           
         end else if (zorro_write && zaddr_in_reg && datastrobe_synced) begin
-          LEDS <= data_in[15:8];
           // write to register
           case (zaddr & 'h0000ff)
             'h00: display_enable <= data_in[0];
@@ -596,12 +601,13 @@ always @(posedge z_sample_clk) begin
         // ram too slow TODO: report this
         zorro_ram_read_request <= 0;
         zorro_state <= IDLE;
-        data <= 'h0000;
       end else if (zorro_ram_read_done) begin
         zorro_ram_read_request <= 0;
         zorro_state <= WAIT_READ;
-        data <= zorro_ram_read_data;
+        data <= zorro_ram_read_data|'h5555;
+        dataout_enable <= 1;
         read_counter <= 0;
+        z_ready <= 1'bZ;
       end
   
     // ----------------------------------------------------------------------------------
@@ -612,22 +618,21 @@ always @(posedge z_sample_clk) begin
         dataout_enable <= 1;
         dataout <= 1;
         slaven <= 1;
-        z_ready <= 1'bZ;
+        data <= zorro_ram_read_data;
       end
    
     // ----------------------------------------------------------------------------------
     WAIT_WRITE:
-      // FIXME race conditions occur if writeq is mutated while read
       if (!zorro_ram_write_request) begin
         // there is still room in the queue
         z_ready <= 1'bZ;
         write_stall <= 0;
-        if (datastrobe_synced) begin
+        if (datastrobe_synced && zdata_in_sync==data_in) begin
           zorro_ram_write_addr <= last_addr;
           zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]};
           zorro_ram_write_data <= zdata_in_sync;
           zorro_ram_write_request <= 1;
-            
+          
           zorro_state <= WAIT_WRITE2;
         end
       end else begin
@@ -706,7 +711,7 @@ always @(posedge z_sample_clk) begin
           // TODO additional wait state?
         end
       end else if (zorro_ram_write_request) begin
-        if (writeq_fill<max_fill-1) begin
+        if (writeq_fill<max_fill) begin
           // process write request
           zorro_ram_write_done <= 1;
           zorro_ram_write_request <= 0;
@@ -751,9 +756,9 @@ always @(posedge z_sample_clk) begin
       end
       
     RAM_READING_ZORRO: begin    
-        ram_enable <= 0;
         if (data_out_ready) begin
-          zorro_ram_read_data <= ram_data_out;
+          //ram_enable <= 0;
+          zorro_ram_read_data <= zorro_ram_read_addr; //ram_data_out;
           zorro_ram_read_done <= 1;
           zorro_ram_read_request <= 0;
           ram_arbiter_state <= RAM_ROW_FETCHED;
