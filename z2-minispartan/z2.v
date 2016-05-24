@@ -44,8 +44,8 @@ input videoVS,
 input videoHS,
 input videoR3,
 input videoR2,
-input videoR1,
-input videoR0,
+//input videoR1,
+//input videoR0,
 input videoG3,
 input videoG2,
 input videoG1,
@@ -54,6 +54,10 @@ input videoG0,
 //input videoB2,
 input videoB1,
 input videoB0,
+
+// debug uart
+output uartTX,
+input uartRX,
 
 // SD
 output SD_nCS,
@@ -92,6 +96,21 @@ clk_wiz_v3_6 DCM(
   .CLK_IN1(CLK50),
   .CLK_OUT100(z_sample_clk),
   .CLK_OUT75(vga_clk)
+);
+
+reg uart_reset = 0;
+reg [7:0] uart_data;
+reg uart_write = 0;
+reg uart_clk = 0;
+
+uart uart(
+  .uart_tx(uartTX),
+  
+  .uart_busy(uart_busy),   // High means UART is transmitting
+  .uart_wr_i(uart_write),   // Raise to transmit byte
+  .uart_dat_i(uart_data),  // 8-bit data
+  .sys_clk_i(uart_clk),   // 115200Hz
+  .sys_rst_i(uart_reset)    // System reset
 );
 
 // sd card interface
@@ -351,11 +370,11 @@ parameter CONFIGURED = 8;
 reg [6:0] zorro_state = CONFIGURED;
 
 assign datastrobe_synced = ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)));
-assign zaddr_in_ram = (znAS_sync[1]==0 && zaddr_sync==zaddr && zaddr>=ram_low && zaddr<ram_high);
-assign zaddr_in_reg = (znAS_sync[1]==0 && zaddr_sync==zaddr && zaddr>=reg_low && zaddr<reg_high);
-assign zaddr_autoconfig = (znAS_sync[1]==0 && zaddr_sync==zaddr && zaddr>=rom_low && zaddr<rom_high);
-assign zorro_read = zREAD_sync[1];
-assign zorro_write = !zREAD_sync[1];
+assign zaddr_in_ram = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr>=ram_low && zaddr<ram_high);
+assign zaddr_in_reg = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr>=reg_low && zaddr<reg_high);
+assign zaddr_autoconfig = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr>=rom_low && zaddr<rom_high);
+assign zorro_read = (zREAD_sync[1] & zREAD_sync[0]);
+assign zorro_write = (!zREAD_sync[1] & !zREAD_sync[0]);
 
 reg row_fetched = 0;
 
@@ -393,6 +412,27 @@ parameter RAM_FETCHING_ROW = 1;
 parameter RAM_ROW_FETCHED = 2;
 parameter RAM_READING_ZORRO = 3;
 parameter RAM_WRITING = 4;
+
+reg [5:0] uart_nybble = 0;
+
+reg [15:0] time_ns = 0;
+reg [2:0] time_corr = 0;
+
+always @(posedge vga_clk) begin
+  // 75mhz to nanosecond clock
+  if (time_corr==2) begin
+    time_corr <= 0;
+    time_ns <= time_ns + 13;
+  end else begin
+    time_corr <= time_corr + 1;
+    time_ns <= time_ns + 14;
+  end
+  
+  if (time_ns>=4340) begin
+    time_ns <= 0;
+    uart_clk = ~uart_clk;
+  end
+end
 
 /*
 problem:
@@ -491,6 +531,10 @@ always @(posedge z_sample_clk) begin
       blitter_rgb <= 'hffff;
       blitter_enable <= 1;
       zorro_state <= IDLE;
+    
+      uart_write <= 1;
+      uart_data <= 33;
+      uart_nybble <= 9;
     end
   
     // ----------------------------------------------------------------------------------  
@@ -501,10 +545,15 @@ always @(posedge z_sample_clk) begin
       write_stall <= 0;
       z_ready <= 1'bZ; // clear XRDY (cpu wait)
       
+      if (uart_nybble==9 && uart_busy) begin
+        uart_write <= 0;
+        uart_nybble <= 0;
+      end
+      
       if (znRST_sync[1]==0) begin
         // system reset
         //zorro_state <= RESET;
-      end else if (znAS_sync[1]==0) begin
+      end else if (znAS_sync[1]==0 && znAS_sync[0]==0) begin
         if (zorro_read && zaddr_in_ram) begin
           // read RAM
           // request ram access from arbiter
@@ -597,7 +646,7 @@ always @(posedge z_sample_clk) begin
   
     // ----------------------------------------------------------------------------------
     WAIT_READ2:
-      if (znAS_sync[1]==1) begin
+      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
         // ram too slow TODO: report this
         zorro_ram_read_request <= 0;
         zorro_state <= IDLE;
@@ -612,7 +661,7 @@ always @(posedge z_sample_clk) begin
   
     // ----------------------------------------------------------------------------------
     WAIT_READ:
-      if (znAS_sync[1]==1) begin
+      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
         zorro_state <= IDLE;
       end else begin
         dataout_enable <= 1;
@@ -624,17 +673,59 @@ always @(posedge z_sample_clk) begin
     // ----------------------------------------------------------------------------------
     WAIT_WRITE:
       if (!zorro_ram_write_request) begin
-        // there is still room in the queue
-        z_ready <= 1'bZ;
-        write_stall <= 0;
-        if (datastrobe_synced && zdata_in_sync==data_in) begin
-          zorro_ram_write_addr <= last_addr;
-          zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]};
-          zorro_ram_write_data <= zdata_in_sync;
-          zorro_ram_write_request <= 1;
+      
+        /*if (uart_nybble<4) begin
+          z_ready <= 0;
+          if (uart_busy && uart_write) begin
+            uart_write <= 0;
+          end else if (!uart_busy && uart_write==0) begin
+            if (uart_nybble==0) begin
+              if (last_addr[7:4]<10)
+                uart_data <= last_addr[7:4]+48;
+              else
+                uart_data <= last_addr[7:4]+87;
+              uart_nybble <= 1;
+              uart_write <= 1;
+            end else if (uart_nybble==1) begin
+              if (last_addr[3:0]<10)
+                uart_data <= last_addr[3:0]+48;
+              else
+                uart_data <= last_addr[3:0]+87;
+              uart_nybble <= 2;
+              uart_write <= 1;
+            end else if (uart_nybble==2) begin
+              uart_data <= 13;
+              uart_nybble <= 3;
+              uart_write <= 1;
+            end else if (uart_nybble==3) begin
+              uart_data <= 10;
+              uart_nybble <= 4;
+              uart_write <= 1;
+            end
+          end
+        // nybble>=4
+        end else if (uart_busy && uart_nybble==4) begin
+          // wait
+        end else if (!uart_busy) begin*/
+          /*uart_data <= 0;
+          uart_nybble <= 0;
+          uart_write <= 0;*/
           
-          zorro_state <= WAIT_WRITE2;
-        end
+          // there is still room in the queue
+          z_ready <= 1'bZ;
+          write_stall <= 0;
+          if (datastrobe_synced && zdata_in_sync==data_in) begin
+            zorro_ram_write_addr <= last_addr;
+            zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]};
+            zorro_ram_write_data <= zdata_in_sync;
+            zorro_ram_write_request <= 1;
+            
+            zorro_state <= WAIT_WRITE2;
+          end
+        /*end else begin
+          z_ready <= 0;
+          write_stall <= 1;
+        end*/
       end else begin
         z_ready <= 0;
         write_stall <= 1;
@@ -642,7 +733,10 @@ always @(posedge z_sample_clk) begin
     
     // ----------------------------------------------------------------------------------
     WAIT_WRITE2: begin
-      if (znAS_sync[1]==1) zorro_state <= IDLE;
+      z_ready <= 1'bZ;
+      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
+        zorro_state <= IDLE;
+      end
     end
     
   endcase
@@ -758,7 +852,7 @@ always @(posedge z_sample_clk) begin
     RAM_READING_ZORRO: begin    
         if (data_out_ready) begin
           //ram_enable <= 0;
-          zorro_ram_read_data <= zorro_ram_read_addr; //ram_data_out;
+          zorro_ram_read_data <= ram_data_out; // zorro_ram_read_addr; <- debug
           zorro_ram_read_done <= 1;
           zorro_ram_read_request <= 0;
           ram_arbiter_state <= RAM_ROW_FETCHED;
