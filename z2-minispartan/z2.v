@@ -316,7 +316,7 @@ reg [7:0] read_counter = 0;
 reg [7:0] fetch_delay_value = 'h09; // 8f0004
 reg [7:0] margin_x = 0; // 8f0006
 
-reg [7:0] dataout_time = 'h03; // 8f000a
+reg [7:0] dataout_time = 'h02; // 8f000a
 reg [7:0] slaven_time = 'h03; // 8f000c
 reg [7:0] zready_time = 'h23; // 8f000e
 reg [7:0] read_to_fetch_time = 'h2c; // 8f0002
@@ -367,7 +367,7 @@ parameter WAIT_READ_ROM = 5;
 parameter WAIT_WRITE2 = 6;
 parameter WAIT_READ2 = 7;
 parameter CONFIGURED = 8;
-reg [6:0] zorro_state = CONFIGURED;
+reg [6:0] zorro_state = RESET;
 
 assign datastrobe_synced = ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)));
 assign zaddr_in_ram = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr>=ram_low && zaddr<ram_high);
@@ -529,7 +529,7 @@ always @(posedge z_sample_clk) begin
       
     CONFIGURED: begin
       blitter_rgb <= 'hffff;
-      blitter_enable <= 1;
+      blitter_enable <= 0;
       zorro_state <= IDLE;
     
       uart_write <= 1;
@@ -560,11 +560,12 @@ always @(posedge z_sample_clk) begin
           zorro_ram_read_addr <= ((zaddr_sync-ram_low)>>1);
           zorro_ram_read_request <= 1;
           zorro_ram_read_done <= 0;
-          data <= 'h5555;
-          dataout <= 0;
-          dataout_enable <= 1;
-          slaven <= 0;
+          data <= 'hffff;
           read_counter <= 0;
+          
+          slaven <= 1;
+          dataout_enable <= 1;
+          dataout <= 1;
           
           z_ready <= 0;
           zorro_state <= WAIT_READ2;
@@ -645,29 +646,30 @@ always @(posedge z_sample_clk) begin
     end
   
     // ----------------------------------------------------------------------------------
-    WAIT_READ2:
+    WAIT_READ2: begin
       if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
         // ram too slow TODO: report this
         zorro_ram_read_request <= 0;
         zorro_state <= IDLE;
       end else if (zorro_ram_read_done) begin
+        read_counter <= read_counter + 1;
         zorro_ram_read_request <= 0;
-        zorro_state <= WAIT_READ;
-        data <= zorro_ram_read_data|'h5555;
-        dataout_enable <= 1;
-        read_counter <= 0;
-        z_ready <= 1'bZ;
+        
+        if (read_counter >= dataout_time) begin
+          zorro_state <= WAIT_READ;
+        end
+        data <= zorro_ram_read_data;
       end
+    end
   
     // ----------------------------------------------------------------------------------
     WAIT_READ:
       if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
         zorro_state <= IDLE;
+        z_ready <= 1'bZ;
       end else begin
-        dataout_enable <= 1;
-        dataout <= 1;
-        slaven <= 1;
         data <= zorro_ram_read_data;
+        z_ready <= 1'bZ;
       end
    
     // ----------------------------------------------------------------------------------
