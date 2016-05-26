@@ -63,16 +63,16 @@ int InitCard(struct RTGBoard* b) {
   b->chip_type = 0;
   b->controller_type = 0;
   
-  b->flags = 0;
+  b->flags = (b->flags&0xffff0000);
   b->sprite_flags = 0;
 
-  b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB888;
+  b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
 
   // TODO read from autoconf/expansion.library
   b->memory = (void*)0x600000;
   b->memory2 = (void*)0x600000;
-  b->memory_size = 0x400000;
-  b->memory2_size = 0x400000;
+  b->memory_size = 0x2d0000;
+  b->memory2_size = 0x2d0000;
   b->registers = (void*)0x8f0000;
   b->io = (void*)0x8f0000;
 
@@ -137,6 +137,11 @@ int InitCard(struct RTGBoard* b) {
   b->fn_monitor_switch = monitor_switch;
 
   b->fn_vsync_wait = nop;
+  b->fn_pan = pan;
+  b->fn_set_memory_mode = nop;
+  b->fn_set_write_mask = nop;
+  b->fn_set_clear_mask = nop;
+  b->fn_set_read_plane = nop;
 
   return 1;
 }

@@ -65,7 +65,7 @@ struct RTGBoard {
   
   uint32 memory_size;
   char* name;
-  char* unknown1;
+  char unknown1[32];
 
   void* self;
   void* p1;
@@ -143,10 +143,10 @@ struct RTGBoard {
   void* fn_get_pixelclock_index;
   void* fn_get_pixelclock;
   void* fn_set_clock;
-  void* f15;
-  void* f16;
-  void* f17;
-  void* f18;
+  void* fn_set_memory_mode;
+  void* fn_set_write_mask;
+  void* fn_set_clear_mask;
+  void* fn_set_read_plane;
   void* fn_vsync_wait;
   void* f20;
   void* fn_blitter_wait;
