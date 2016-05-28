@@ -313,7 +313,7 @@ parameter io_high = 24'hde0010;
 
 reg [7:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
-reg [7:0] fetch_delay_value = 'h09; // 8f0004
+reg [7:0] fetch_delay_value = 'h04; // 8f0004
 reg [7:0] margin_x = 0; // 8f0006
 
 reg [7:0] dataout_time = 'h02; // 8f000a
@@ -336,10 +336,17 @@ reg [10:0] blitter_x1 = 0;     // 20
 reg [10:0] blitter_y1 = 0;     // 22
 reg [10:0] blitter_x2 = 1279;  // 24
 reg [10:0] blitter_y2 = 719;   // 26
+reg [10:0] blitter_x3 = 0; // 2c
+reg [10:0] blitter_y3 = 0; // 2e
+reg [10:0] blitter_x4 = 'h100; // 30
+reg [10:0] blitter_y4 = 'h100; // 32
 reg [15:0] blitter_rgb = 'h0008; // 28
-reg blitter_enable = 1; // 2a
+reg [15:0] blitter_copy_rgb = 'h0000;
+reg [3:0]  blitter_enable = 1; // 2a
 reg [10:0] blitter_curx = 0;
 reg [10:0] blitter_cury = 0;
+reg [10:0] blitter_curx2 = 0;
+reg [10:0] blitter_cury2 = 0;
 
 reg write_stall = 0;
 
@@ -355,7 +362,6 @@ reg [7:0] hsync_count = 0;
 reg z_confdone = 0;
 assign znCFGOUT = ~z_confdone;
 
-
 // main FSM
 
 parameter RESET = 0;
@@ -367,7 +373,7 @@ parameter WAIT_READ_ROM = 5;
 parameter WAIT_WRITE2 = 6;
 parameter WAIT_READ2 = 7;
 parameter CONFIGURED = 8;
-reg [6:0] zorro_state = RESET;
+reg [6:0] zorro_state = CONFIGURED;
 
 assign datastrobe_synced = ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)));
 assign zaddr_in_ram = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr>=ram_low && zaddr<ram_high);
@@ -456,8 +462,13 @@ always @(posedge z_sample_clk) begin
       z_ready <= 1'bZ; // clear XRDY (cpu wait)
       zorro_ram_write_done <= 1;
       zorro_ram_read_done <= 1;
-      blitter_rgb <= 'h4444;
+      blitter_rgb <= 'h0005;
       blitter_enable <= 1;
+      
+      ram_low   <= 'h600000;
+      ram_high  <= 'h600000 + ram_size;
+      reg_low   <= 'h600000 + reg_base;
+      reg_high  <= 'h600000 + reg_base + 'h100;
       
       zorro_state <= CONFIGURING;
     end
@@ -552,7 +563,7 @@ always @(posedge z_sample_clk) begin
       
       if (znRST_sync[1]==0) begin
         // system reset
-        //zorro_state <= RESET;
+        zorro_state <= IDLE;
       end else if (znAS_sync[1]==0 && znAS_sync[0]==0) begin
         if (zorro_read && zaddr_in_ram) begin
           // read RAM
@@ -599,19 +610,25 @@ always @(posedge z_sample_clk) begin
             'h26: blitter_y2 <= data_in[10:0];
             'h28: blitter_rgb <= data_in[15:0];
             'h2a: begin
-              blitter_enable <= data_in[8];
+              blitter_enable <= data_in[3:0];
               blitter_curx <= blitter_x1;
               blitter_cury <= blitter_y1;
+              blitter_curx2 <= blitter_x3;
+              blitter_cury2 <= blitter_y3;
             end
+            'h2c: blitter_x3 <= data_in[10:0];
+            'h2e: blitter_y3 <= data_in[10:0];
+            'h30: blitter_x4 <= data_in[10:0];
+            'h32: blitter_y4 <= data_in[10:0];
             
             // sd card regs
-            'h30: sd_reset <= data_in[8];
-            'h32: sd_read <= data_in[8];
-            'h34: sd_write <= data_in[8];
-            'h36: sd_handshake_in <= data_in[8];
-            'h38: sd_addr_in[31:16] <= data_in;
-            'h3a: sd_addr_in[15:0] <= data_in;
-            'h3c: sd_data_in <= data_in[15:8];
+            'h60: sd_reset <= data_in[8];
+            'h62: sd_read <= data_in[8];
+            'h64: sd_write <= data_in[8];
+            'h66: sd_handshake_in <= data_in[8];
+            'h68: sd_addr_in[31:16] <= data_in;
+            'h6a: sd_addr_in[15:0] <= data_in;
+            'h6c: sd_data_in <= data_in[15:8];
           endcase
         end else if (zorro_read && zaddr_in_reg) begin
           // read from registers
@@ -621,22 +638,32 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           
           case (zaddr & 'h0000ff)
-            'h2a: data <= blitter_enable?16'hffff:16'h0000;
-          
-            'h40: data <= ram_low[23:16];
-            'h42: data <= ram_low[15:0];
-            'h44: data <= ram_high[23:16];
-            'h46: data <= ram_high[15:0];
+            /*'h20: data <= blitter_x1;
+            'h22: data <= blitter_y1;
+            'h24: data <= blitter_x2;
+            'h26: data <= blitter_y2;
             
-            'h30: data <= sd_busy<<8;
-            'h32: data <= sd_read<<8;
-            'h34: data <= sd_write<<8;
-            'h36: data <= sd_handshake_out<<8;
-            'h38: data <= sd_addr_in[31:16];
-            'h3a: data <= sd_addr_in[15:0];
-            'h3c: data <= sd_data_in<<8;
-            'h3e: data <= sd_data_out<<8;
-            'h40: data <= sd_error;
+            'h28: data <= blitter_rgb;*/
+            'h2a: data <= blitter_enable|16'h0000;
+            /*'h30: data <= blitter_x3;
+            'h32: data <= blitter_y3;
+            'h34: data <= blitter_x4;
+            'h36: data <= blitter_y4;*/
+          
+            'h00: data <= ram_low[23:16];
+            'h02: data <= ram_low[15:0];
+            'h04: data <= ram_high[23:16];
+            'h06: data <= ram_high[15:0];
+            
+            'h60: data <= sd_busy<<8;
+            'h62: data <= sd_read<<8;
+            'h64: data <= sd_write<<8;
+            'h66: data <= sd_handshake_out<<8;
+            'h68: data <= sd_addr_in[31:16];
+            'h6a: data <= sd_addr_in[15:0];
+            'h6c: data <= sd_data_in<<8;
+            'h6e: data <= sd_data_out<<8;
+            'h70: data <= sd_error;
             
             default: data <= 'h0000;
           endcase
@@ -774,21 +801,30 @@ always @(posedge z_sample_clk) begin
           ram_enable <= 0;
           ram_arbiter_state <= RAM_ROW_FETCHED;
         end else begin
-          fetch_buffer[fetch_x] <= ram_data_out[15:0];
-          
-          if (cmd_ready) begin
-            fetch_x <= fetch_x + 1;
-            ram_addr  <= ((fetch_y << 11) | fetch_x);
-            ram_enable <= 1; // fetch next
-            ram_byte_enable <= 'b11;
-            ram_write <= 0;
+          if (fetch_x == 'h200) begin
+            fetch_delay <= fetch_delay_value;
           end
+        
+          if (fetch_delay != 0)
+            fetch_delay <= fetch_delay-1;
+          else begin
+            fetch_buffer[fetch_x] <= ram_data_out[15:0];
+            
+            if (cmd_ready) begin
+              fetch_x <= fetch_x + 1;
+              ram_addr  <= ((fetch_y << 11) | fetch_x[10:0]);
+              ram_enable <= 1; // fetch next
+              ram_byte_enable <= 'b11;
+              ram_write <= 0;
+            end
+          end
+          
         end
       end
     RAM_ROW_FETCHED:
       if (!row_fetched) begin
         ram_arbiter_state <= RAM_READY;
-      end else if (writeq_fill>0) begin
+      end else if (writeq_fill>0 && !blitter_enable) begin
         // process write queue
         if (cmd_ready) begin
           if (writeq_addr[writeq_fill-1][uds_bit] && !writeq_addr[writeq_fill-1][lds_bit])
@@ -806,7 +842,7 @@ always @(posedge z_sample_clk) begin
           writeq_fill <= writeq_fill-1;
           // TODO additional wait state?
         end
-      end else if (zorro_ram_write_request) begin
+      end else if (zorro_ram_write_request && !blitter_enable) begin
         if (writeq_fill<max_fill) begin
           // process write request
           zorro_ram_write_done <= 1;
@@ -821,7 +857,7 @@ always @(posedge z_sample_clk) begin
           zorro_ram_write_done <= 0;
         end
         
-      end else if (zorro_ram_read_request) begin
+      end else if (zorro_ram_read_request && !blitter_enable) begin
         // process read request
         zorro_ram_read_done <= 0;
         ram_enable <= 0;
@@ -832,20 +868,51 @@ always @(posedge z_sample_clk) begin
           ram_enable <= 1;
           ram_arbiter_state <= RAM_READING_ZORRO;
         end
-      end else if (blitter_enable && cmd_ready) begin
+      end else if ((blitter_enable==1 || blitter_enable==3) && cmd_ready) begin
+        // rect fill blitter
         if (blitter_curx<=blitter_x2) begin
           blitter_curx <= blitter_curx + 1;
           ram_byte_enable <= 'b11;
-          ram_data_in <= blitter_rgb;
           ram_addr    <= (blitter_cury<<11)|blitter_curx;
-          ram_write   <= 1;
-          ram_enable  <= 1;
+          if (blitter_enable == 3) begin            
+            blitter_curx2 <= blitter_curx2 + 1;
+            blitter_enable <= 2;
+            ram_data_in <= blitter_copy_rgb;
+            ram_write   <= 1;
+            ram_enable  <= 1;
+          end else begin
+            ram_data_in <= blitter_rgb;
+            ram_write   <= 1;
+            ram_enable  <= 1;
+          end
         end else if (blitter_cury<blitter_y2) begin
           blitter_cury <= blitter_cury + 1;
           blitter_curx <= blitter_x1;
         end else begin
           blitter_curx <= 0;
           blitter_cury <= 0;
+          blitter_enable <= 0;
+          ram_enable <= 0;
+        end
+      end else if (blitter_enable==4 && data_out_ready) begin
+        // block copy (data ready)
+        ram_enable <= 0;
+        blitter_copy_rgb <= ram_data_out;
+        blitter_enable <= 3;
+      end else if (blitter_enable==2 && cmd_ready && data_out_queue_empty && (counter_x<(h_max-fetch_preroll-'h10))) begin
+        // block copy (read)
+        if (blitter_curx2<=blitter_x4) begin
+          ram_byte_enable <= 'b11;
+          ram_addr    <= (blitter_cury2<<11)|blitter_curx2;
+          ram_write   <= 0;
+          ram_enable  <= 1;
+          blitter_enable <= 4; // wait for read
+        end else if (blitter_cury2<blitter_y4) begin
+          blitter_cury2 <= blitter_cury2 + 1;
+          blitter_curx2 <= blitter_x3;
+        end else begin
+          blitter_curx2 <= 0;
+          blitter_cury2 <= 0;
           blitter_enable <= 0;
           ram_enable <= 0;
         end

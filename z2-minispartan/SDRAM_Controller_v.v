@@ -500,7 +500,7 @@ always @(posedge clk)
          s_precharge: begin
                state                     <= s_idle_in_3;
                iob_command               <= CMD_PRECHARGE;
-               iob_address[prefresh_cmd] <= 1'b1; // A10 actually matters - it selects all banks or just one
+               iob_address[prefresh_cmd] <= 1'b0; // A10 actually matters - it selects all banks or just one
             end
          //-------------------------------------------------------------------
          //-- We should never get here, but if we do then reset the memory

@@ -62,8 +62,8 @@ struct RTGBoard {
   void* registers;
   void* memory;
   void* io;
-  
   uint32 memory_size;
+  
   char* name;
   char unknown1[32];
 
@@ -79,7 +79,7 @@ struct RTGBoard {
 
   // device properties
 
-  uint32 type;
+  uint32 type; // really longs?
   uint32 chip_type;
   uint32 controller_type;
   
@@ -87,8 +87,8 @@ struct RTGBoard {
   uint16 bits_per_channel;
   uint32 flags;
   uint16 sprite_flags;
-  uint16 unknown2;
-  uint32 unknown3;
+  uint16 private_flags1;
+  uint32 private_flags2;
 
   uint16 number;
   uint16 color_formats;
@@ -148,7 +148,7 @@ struct RTGBoard {
   void* fn_set_clear_mask;
   void* fn_set_read_plane;
   void* fn_vsync_wait;
-  void* f20;
+  void* f20; // set interrupt
   void* fn_blitter_wait;
   void* f22;
   void* f23;
@@ -172,7 +172,7 @@ struct RTGBoard {
   void* f41;
   void* f42;
   void* f43;
-  void* f44;
+  void* f44; // res0
   void* f45;
   void* f46;
   void* f47;
@@ -185,7 +185,7 @@ struct RTGBoard {
 
   void* fn_is_vsynced;
   void* fn_get_current_y;
-  void* f56;
+  void* fn_set_dpms;
   void* fn_reset;
   void* f58;
 
@@ -202,7 +202,7 @@ struct RTGBoard {
   void* f67;
   void* f68;
 
-  struct MinList unknown4;
+  struct MinList features;
 
   // runtime properties
 
