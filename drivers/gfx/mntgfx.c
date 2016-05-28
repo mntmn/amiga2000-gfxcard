@@ -118,100 +118,147 @@ int InitCard(struct RTGBoard* b) {
   b->num_pixelclocks_32bit = 1;
 
   b->fn_init_dac = init_dac;
-  b->fn_init_chip = init_chip;
+  b->fn_init_mode = init_mode;
 
   b->fn_get_pitch = get_pitch;
   b->fn_map_address = map_address;
   
-  b->fn_is_bitmap_compatible = nop;
-  b->fn_set_palette = nop;
+  b->fn_is_bitmap_compatible = is_bitmap_compatible;
+  b->fn_set_palette = set_palette;
   b->fn_enable_display = enable_display;
 
-  //b->fn_rect_fill = rect_fill;
-  //b->fn_blitter_wait = blitter_wait;
+  b->fn_rect_fill = rect_fill;
+  b->fn_blitter_wait = blitter_wait;
 
   b->fn_get_pixelclock_index = get_pixelclock_index;
-  b->fn_get_pixelclock = get_pixelclock;
+  b->fn_get_pixelclock_hz = get_pixelclock_hz;
   b->fn_set_clock = set_clock;
 
   b->fn_monitor_switch = monitor_switch;
 
-  b->fn_vsync_wait = nop;
+  b->fn_vsync_wait = vsync_wait;
   b->fn_pan = pan;
-  b->fn_set_memory_mode = nop;
-  b->fn_set_write_mask = nop;
-  b->fn_set_clear_mask = nop;
-  b->fn_set_read_plane = nop;
+  b->fn_set_memory_mode = set_memory_mode;
+  b->fn_set_write_mask = set_write_mask;
+  b->fn_set_clear_mask = set_clear_mask;
+  b->fn_set_read_plane = set_read_plane;
 
   return 1;
 }
 
-// placeholder function that returns success
+// placeholder function
 ADDTABL_0(nop);
-int nop() {
+void nop() {
   debug("mntgfx: nop()");
-  return 1;
 }
 
-ADDTABL_0(init_dac);
-int init_dac() {
+ADDTABL_2(init_dac,a0,d7);
+void init_dac(struct RTGBoard* b, uint16 format) {
   debug("mntgfx: init_dac()");
+}
+
+// toggle amiga video / rtg
+ADDTABL_2(enable_display,a0,d0);
+uint32 enable_display(struct RTGBoard* b, uint16 enabled) {
+  debug("enabled: %x",enabled);
   return 1;
 }
 
-ADDTABL_0(enable_display);
-void enable_display() {
+ADDTABL_6(pan,a0,a1,d0,d1,d2,d7);
+void pan(struct RTGBoard* b, void* mem, uint16 w, int16 x, int16 y, uint16 format) {
   debug("");
 }
 
-ADDTABL_0(pan);
-int pan() {
+ADDTABL_2(set_memory_mode,a0,d7);
+void set_memory_mode(register struct RTGBoard* b asm("a0"), uint16 format) {
   debug("");
-  return 1;
+}
+ADDTABL_2(set_read_plane,a0,d0);
+void set_read_plane(struct RTGBoard* b, uint8 p) {
+  debug("");
+}
+ADDTABL_2(set_write_mask,a0,d0);
+void set_write_mask(struct RTGBoard* b, uint8 m) {
+  debug("");
+}
+ADDTABL_2(set_clear_mask,a0,d0);
+void set_clear_mask(struct RTGBoard* b, uint8 m) {
+  debug("");
+}
+ADDTABL_1(vsync_wait,a0);
+void vsync_wait(struct RTGBoard* b) {
+  debug("");
+}
+ADDTABL_1(set_clock,a0);
+void set_clock(struct RTGBoard* b) {
+  debug("");
+}
+ADDTABL_3(set_palette,a0,d0,d1);
+void set_palette(struct RTGBoard* b,uint16 idx,uint16 len) {
+  debug("");
 }
 
-ADDTABL_0(set_clock);
-int set_clock() {
-  debug("");
-  return 1;
-}
-
-ADDTABL_3(init_chip,a0,a1,d0);
-uint32 init_chip(struct RTGBoard* b, struct ModeInfo* m, int16 border) {
-  debug("mntgfx: init_chip");
+ADDTABL_3(init_mode,a0,a1,d0);
+void init_mode(struct RTGBoard* b, struct ModeInfo* m, int16 border) {
+  debug("mntgfx: init_mode");
   b->mode_info = m;
   b->border = border;
-  return 1;
 }
 
-ADDTABL_1(get_pitch,a0);
-uint32 get_pitch() {
-  debug("");
+ADDTABL_2(is_bitmap_compatible,a0,d7);
+uint32 is_bitmap_compatible(struct RTGBoard* b, uint16 format) {
+  debug("format: %x",format);
+  return 0xffffffff;
+}
+
+ADDTABL_3(get_pitch,a0,d0,d7);
+uint16 get_pitch(struct RTGBoard* b, uint16 width, uint16 format) {
+  debug("width: %x format: %x",width,format);
   return 4096;
 }
 
 ADDTABL_2(map_address,a0,a1);
 uint32 map_address(struct RTGBoard* b, uint32 addr) {
-  debug("");
-  return addr; // no mapping
+  debug("%lx",addr);
+  return addr; // direct mapping
 }
 
-ADDTABL_1(get_pixelclock_index,a0);
-uint32 get_pixelclock_index(struct RTGBoard* b) {
+ADDTABL_4(get_pixelclock_index,a0,a1,d0,d7);
+uint32 get_pixelclock_index(struct RTGBoard* b, struct ModeInfo* mode, int32 clock, uint16 format) {
   debug("");
+  // todo update modeinfo
   return 0;
 }
 
-ADDTABL_1(get_pixelclock,a0);
-uint32 get_pixelclock(struct RTGBoard* b) {
+ADDTABL_4(get_pixelclock_hz,a0,a1,d0,d7);
+uint32 get_pixelclock_hz(struct RTGBoard* b, struct ModeInfo* mode, int32 clock, uint16 format) {
   debug("");
   return CLOCK_HZ;
 }
 
-ADDTABL_1(monitor_switch,a0);
-uint32 monitor_switch(struct RTGBoard* b) {
+ADDTABL_2(monitor_switch,a0,d0);
+uint32 monitor_switch(struct RTGBoard* b, uint16 state) {
   debug("");
-  return 1;
+  return state;
+}
+
+ADDTABL_6(rect_fill,a0,d0,d1,d2,d3,d4);
+void rect_fill(struct RTGBoard* b, uint16 x, uint16 y, uint16 w, uint16 h, uint32 color) {
+  debug("");
+  
+  *((uint16*)0x8f0020) = x;
+  *((uint16*)0x8f0022) = y;
+  *((uint16*)0x8f0024) = x+w-1;
+  *((uint16*)0x8f0026) = y+h-1;
+  
+  *((uint16*)0x8f0028) = color;
+  *((uint16*)0x8f002a) = 0xffff; // enable blitter
+}
+
+ADDTABL_1(blitter_wait,a0);
+void blitter_wait(struct RTGBoard* b) {
+  debug("");
+  while(*((uint16*)0x8f002a)) {};
 }
 
 ADDTABL_END();

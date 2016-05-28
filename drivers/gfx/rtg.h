@@ -74,7 +74,7 @@ struct RTGBoard {
 
   struct Interrupt int_hard;
   struct Interrupt int_soft;
-  struct SignalSemaphore lock;
+  char lock[46];
   struct MinList resolutions;
 
   // device properties
@@ -134,14 +134,14 @@ struct RTGBoard {
   void* fn_monitor_switch;
   void* fn_set_palette;
   void* fn_init_dac;
-  void* fn_init_chip;
+  void* fn_init_mode;
   void* fn_pan;
   void* fn_get_pitch;
   void* fn_map_address;
   void* fn_is_bitmap_compatible;
   void* fn_enable_display;
   void* fn_get_pixelclock_index;
-  void* fn_get_pixelclock;
+  void* fn_get_pixelclock_hz;
   void* fn_set_clock;
   void* fn_set_memory_mode;
   void* fn_set_write_mask;

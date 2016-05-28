@@ -97,6 +97,18 @@ _ADDTABL_ARG(arg1);			\
 _ADDTABL_CALL(name);			\
 _ADDTABL_ENDN(name,4)
 
+#define ADDTABL_6(name,arg1,arg2,arg3,arg4,arg5,arg6) \
+_ADDTABL_START(name);			\
+_ADDTABL_ARG(arg6);			\
+_ADDTABL_ARG(arg5);			\
+_ADDTABL_ARG(arg4);			\
+_ADDTABL_ARG(arg3);			\
+_ADDTABL_ARG(arg2);			\
+_ADDTABL_ARG(arg1);			\
+_ADDTABL_CALL(name);			\
+_ADDTABL_ENDN(name,6)
+
+
 #define ADDTABL_END() asm(".stabs \"___FuncTable__\",20,0,0,-1")
 
 #endif /* _HEADERS_STABS_H */
