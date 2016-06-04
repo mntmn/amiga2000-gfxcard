@@ -158,12 +158,16 @@ reg  [23:0] ram_addr = 0;
 wire [15:0] ram_data_out;
 wire data_out_ready;
 wire data_out_queue_empty;
+wire [4:0] sdram_state;
+wire sdram_btb;
 reg  [15:0] ram_data_in;
 reg  ram_write = 0;
+reg  ram_burst = 0;
 reg  [1:0]  ram_byte_enable;
 
 reg  [15:0] fetch_buffer [0:1299]; // 16bpp line buffer
 reg  [10:0] fetch_x = 0;
+reg  [10:0] fetch_x2 = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
 
@@ -189,6 +193,9 @@ SDRAM_Controller_v sdram(
   .data_out(ram_data_out),
   .data_out_ready(data_out_ready),
   .data_out_queue_empty(data_out_queue_empty),
+  .sdram_state(sdram_state),
+  .sdram_btb(sdram_btb),
+  .burst(ram_burst),
 
   // signals
   .SDRAM_CLK(SDRAM_CLK),  
@@ -323,7 +330,7 @@ reg [7:0] read_to_fetch_time = 'h2c; // 8f0002
 
 // registers
 reg display_enable = 1;
-reg [7:0] fetch_preroll = 'h20;
+reg [7:0] fetch_preroll = 'h40;
 
 reg [7:0]  glitch_reg = 'h09; // 8f0010
 reg [11:0] glitchx_reg = 'h1fe; // 'h203; // 8f0012
@@ -418,6 +425,8 @@ parameter RAM_FETCHING_ROW = 1;
 parameter RAM_ROW_FETCHED = 2;
 parameter RAM_READING_ZORRO = 3;
 parameter RAM_WRITING = 4;
+parameter RAM_BURST_OFF = 5;
+parameter RAM_BURST_ON = 6;
 
 reg [5:0] uart_nybble = 0;
 
@@ -440,20 +449,11 @@ always @(posedge vga_clk) begin
   end
 end
 
-/*
-problem:
-read/write mix (block copy)
-
-- some zorro writes are not seen
-- or some zorro writes are not committed
-*/
-
 // =================================================================================
 // ZORRO MACHINE
 always @(posedge z_sample_clk) begin
-
   LEDS <= zorro_state|(ram_arbiter_state<<5);
-
+  
   case (zorro_state)
     RESET: begin
       dataout_enable <= 0;
@@ -474,7 +474,7 @@ always @(posedge z_sample_clk) begin
     end
     
     CONFIGURING: begin
-      if (zaddr_autoconfig && !znCFGIN) begin
+      /*if (zaddr_autoconfig && !znCFGIN) begin
         if (zorro_read) begin
           // read iospace 'he80000 (Autoconfig ROM)
           dataout_enable <= 1;
@@ -535,7 +535,7 @@ always @(posedge z_sample_clk) begin
         dataout <= 0;
         dataout_enable <= 0;
         slaven <= 0;
-      end
+      end*/
     end
       
     CONFIGURED: begin
@@ -590,7 +590,7 @@ always @(posedge z_sample_clk) begin
         end else if (zorro_write && zaddr_in_reg && datastrobe_synced) begin
           // write to register
           case (zaddr & 'h0000ff)
-            'h00: display_enable <= data_in[0];
+            /*'h00: display_enable <= data_in[0];
             'h02: read_to_fetch_time <= data_in[7:0];
             'h04: fetch_delay_value <= data_in[7:0];
             'h06: margin_x <= data_in[7:0];
@@ -601,7 +601,7 @@ always @(posedge z_sample_clk) begin
             'h10: glitch_reg <= data_in[7:0];
             'h12: glitchx_reg <= data_in[11:0];
             'h14: glitch_offset <= data_in[7:0];
-            'h16: negx_margin <= data_in[7:0];
+            'h16: negx_margin <= data_in[7:0];*/
             
             // blitter regs
             'h20: blitter_x1 <= data_in[10:0];
@@ -638,22 +638,11 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           
           case (zaddr & 'h0000ff)
-            /*'h20: data <= blitter_x1;
-            'h22: data <= blitter_y1;
-            'h24: data <= blitter_x2;
-            'h26: data <= blitter_y2;
-            
-            'h28: data <= blitter_rgb;*/
             'h2a: data <= blitter_enable|16'h0000;
-            /*'h30: data <= blitter_x3;
-            'h32: data <= blitter_y3;
-            'h34: data <= blitter_x4;
-            'h36: data <= blitter_y4;*/
-          
-            'h00: data <= ram_low[23:16];
+            /*'h00: data <= ram_low[23:16];
             'h02: data <= ram_low[15:0];
             'h04: data <= ram_high[23:16];
-            'h06: data <= ram_high[15:0];
+            'h06: data <= ram_high[15:0];*/
             
             'h60: data <= sd_busy<<8;
             'h62: data <= sd_read<<8;
@@ -776,55 +765,76 @@ always @(posedge z_sample_clk) begin
   case (ram_arbiter_state)
     RAM_READY: begin
       // start fetching a row
-      fetch_x <= 0;
+      ram_enable <= 1;
       if (row_fetched) begin
-        ram_enable <= 0;
-        if (data_out_queue_empty)
-          ram_arbiter_state <= RAM_ROW_FETCHED;
+        if (cmd_ready) begin
+          ram_burst <= 0;
+          ram_arbiter_state <= RAM_BURST_OFF;
+          fetch_x <= 0;
+        end
       end else begin
         if (cmd_ready) begin
-          ram_addr  <= ((fetch_y << 11) | fetch_x);
-          ram_enable <= 1; // fetch next
+          ram_burst <= 1;
+          ram_addr  <= ((fetch_y << 11) | 504);
           ram_byte_enable <= 'b11;
           ram_write <= 0;
-          ram_arbiter_state <= RAM_FETCHING_ROW;
-          fetch_x <= 1;
+          ram_arbiter_state <= RAM_BURST_ON;
+          fetch_x <= 0;
+          fetch_x2 <= 504;
         end
       end
     end
     
-    RAM_FETCHING_ROW:
+    RAM_BURST_ON: begin
+      if (cmd_ready) begin
+        ram_arbiter_state <= RAM_FETCHING_ROW;
+      end
+    end
+    
+    RAM_BURST_OFF: begin
+      ram_enable <= 0;
+      if (data_out_queue_empty)
+        ram_arbiter_state <= RAM_ROW_FETCHED;
+    end
+    
+    RAM_FETCHING_ROW:    
       if (data_out_ready) begin
         if (fetch_x >= screen_w) begin
-          fetch_x  <= 0;
           row_fetched <= 1; // row completely fetched
-          ram_enable <= 0;
-          ram_arbiter_state <= RAM_ROW_FETCHED;
+          ram_arbiter_state <= RAM_READY;
         end else begin
-          if (fetch_x == 'h200) begin
-            fetch_delay <= fetch_delay_value;
-          end
-        
-          if (fetch_delay != 0)
-            fetch_delay <= fetch_delay-1;
-          else begin
+          ram_enable <= 1;
+          ram_write <= 0;
+          ram_byte_enable <= 'b11;
+          ram_addr  <= ((fetch_y << 11) | fetch_x2); // burst incremented
+          
+          //(sdram_state=='b10010)?'hffff:'h0000; // ram_data_out[15:0];
+          //fetch_x <= fetch_x + 1;
+           
+          //if (sdram_state=='b10010) begin // || sdram_state=='b00111 || sdram_state=='b01101) begin
+          //if (data_out_ready) begin
+            fetch_x <= fetch_x + 1;
+            fetch_x2 <= fetch_x2 + 1;
             fetch_buffer[fetch_x] <= ram_data_out[15:0];
-            
-            if (cmd_ready) begin
-              fetch_x <= fetch_x + 1;
-              ram_addr  <= ((fetch_y << 11) | fetch_x[10:0]);
-              ram_enable <= 1; // fetch next
-              ram_byte_enable <= 'b11;
-              ram_write <= 0;
-            end
-          end
+          //end
+          
+          /*if (cmd_ready) begin
+            fetch_x <= fetch_x + 1;
+            ram_addr  <= ((fetch_y << 11) | fetch_x[10:0]);
+            ram_enable <= 1; // fetch next
+            ram_byte_enable <= 'b11;
+            ram_write <= 0;
+          end*/
           
         end
       end
     RAM_ROW_FETCHED:
-      if (!row_fetched) begin
+      if (counter_x>=h_max-64 && counter_y<screen_h) begin
+        row_fetched <= 0;
+        fetch_x <= 0;
+        fetch_y <= counter_y;
         ram_arbiter_state <= RAM_READY;
-      end else if (writeq_fill>0 && !blitter_enable) begin
+      end else if (writeq_fill>0) begin
         // process write queue
         if (cmd_ready) begin
           if (writeq_addr[writeq_fill-1][uds_bit] && !writeq_addr[writeq_fill-1][lds_bit])
@@ -842,7 +852,7 @@ always @(posedge z_sample_clk) begin
           writeq_fill <= writeq_fill-1;
           // TODO additional wait state?
         end
-      end else if (zorro_ram_write_request && !blitter_enable) begin
+      end else if (zorro_ram_write_request) begin
         if (writeq_fill<max_fill) begin
           // process write request
           zorro_ram_write_done <= 1;
@@ -856,19 +866,18 @@ always @(posedge z_sample_clk) begin
         end else begin
           zorro_ram_write_done <= 0;
         end
-        
-      end else if (zorro_ram_read_request && !blitter_enable) begin
+      end else if (zorro_ram_read_request) begin
         // process read request
         zorro_ram_read_done <= 0;
-        ram_enable <= 0;
         if (cmd_ready && data_out_queue_empty) begin
           ram_write <= 0;
           ram_addr <= zorro_ram_read_addr;
           ram_byte_enable <= 'b11;
           ram_enable <= 1;
           ram_arbiter_state <= RAM_READING_ZORRO;
-        end
-      end else if ((blitter_enable==1 || blitter_enable==3) && cmd_ready) begin
+        end else 
+          ram_enable <= 0;
+      end else if ((blitter_enable>0) && cmd_ready) begin // ==1 || blitter_enable==3
         // rect fill blitter
         if (blitter_curx<=blitter_x2) begin
           blitter_curx <= blitter_curx + 1;
@@ -894,12 +903,13 @@ always @(posedge z_sample_clk) begin
           blitter_enable <= 0;
           ram_enable <= 0;
         end
-      end else if (blitter_enable==4 && data_out_ready) begin
+      end
+      /*end else if (blitter_enable==4 && data_out_ready) begin
         // block copy (data ready)
         ram_enable <= 0;
         blitter_copy_rgb <= ram_data_out;
         blitter_enable <= 3;
-      end else if (blitter_enable==2 && cmd_ready && data_out_queue_empty && (counter_x<(h_max-fetch_preroll-'h10))) begin
+      end else if (blitter_enable==2 && cmd_ready && data_out_queue_empty) begin //  && (counter_x<(h_max-fetch_preroll-'h10))
         // block copy (read)
         if (blitter_curx2<=blitter_x4) begin
           ram_byte_enable <= 'b11;
@@ -916,7 +926,7 @@ always @(posedge z_sample_clk) begin
           blitter_enable <= 0;
           ram_enable <= 0;
         end
-      end
+      end*/
       
     RAM_READING_ZORRO: begin    
         if (data_out_ready) begin
@@ -929,13 +939,6 @@ always @(posedge z_sample_clk) begin
       end
     
   endcase
-  
-  // decide when to fetch next row
-  if (counter_x==h_max-fetch_preroll && counter_y<screen_h) begin
-    row_fetched <= 0;
-    fetch_x <= 0;
-    fetch_y <= counter_y;
-  end
 end
 
 reg[15:0] rgb = 'h0000;
@@ -952,9 +955,7 @@ always @(posedge vga_clk) begin
   end else begin
     counter_x <= counter_x + 1;
     
-    if (counter_x==margin_x+glitchx_reg)
-      display_x <= (display_x + glitch_reg);
-    else if (counter_x>=margin_x)
+    if (counter_x>=margin_x)
       display_x <= display_x + 1;
   end
   
