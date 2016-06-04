@@ -36,6 +36,7 @@ module SDRAM_Controller_v (
    cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in,
    // Read data port
    data_out, data_out_ready, data_out_queue_empty, sdram_state, sdram_btb, burst,
+   burst_col,
    // SDRAM signals
    SDRAM_CLK,  SDRAM_CKE,  SDRAM_CS,   SDRAM_RAS,  SDRAM_CAS,
    SDRAM_WE,   SDRAM_DQM,  SDRAM_ADDR, SDRAM_BA,   SDRAM_DATA
@@ -54,6 +55,7 @@ module SDRAM_Controller_v (
    input  [sdram_address_width-1:0] cmd_address;
    input  [1:0]  cmd_byte_enable;
    input  [15:0] cmd_data_in;
+   input  [8:0] burst_col;
    input  burst;
    output [4:0] sdram_state;
    output sdram_btb;
@@ -65,6 +67,8 @@ module SDRAM_Controller_v (
    reg iob_cke             = 1'b0;
    reg [1:0]  iob_bank     = 2'b00;
    reg [15:0] data_out_reg;
+   
+   
 
    output [15:0] data_out;    assign data_out       = data_out_reg;
 
@@ -393,7 +397,7 @@ always @(posedge clk)
              iob_dqm     <= 2'b00;
              iob_dq_hiz  <= 1'b1;
              
-             if (save_col=='b111111000) begin             
+             if (save_col==burst_col) begin        // 'b111111000      
                state       <= s_precharge;
                data_ready_delay[data_ready_delay_high]   <= 1'b0;
                ready_for_new   <= 1'b0;
