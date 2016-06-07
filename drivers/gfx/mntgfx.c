@@ -25,9 +25,9 @@
 
 #include "mntgfx.h"
 
-//#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
+#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
 
-#define debug(x,args...) ;
+//#define debug(x,args...) ;
 
 static struct ExecBase* SysBase;
 static struct Library* GfxBase;
@@ -170,7 +170,7 @@ void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), re
 }
 
 void set_memory_mode(register struct RTGBoard* b asm("a0"), register uint16 format asm("d7")) {
-  debug("");
+  //debug("");
 }
 void set_read_plane(register struct RTGBoard* b asm("a0"), uint8 p asm("d0")) {
   debug("");
@@ -192,27 +192,50 @@ void set_clock(register struct RTGBoard* b asm("a0")) {
   debug("");
 }
 void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint16 len asm("d1")) {
-  debug("");
+  int i=0;
+  int j=0;
+  //debug("idx: %d, len: %d",idx,len);
+
+  /*if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+    }*/
+  
+  for (i=0; i<256; i++) {
+    *((uint16*)0x8f0200+i)=b->palette[j];
+    *((uint16*)0x8f0400+i)=b->palette[j+1];
+    *((uint16*)0x8f0600+i)=b->palette[j+2];
+    j+=3;
+  }
 }
 
 void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1"), int16 border asm("d0")) {
+  
   debug("mntgfx: init_mode");
   b->mode_info = m;
   b->border = border;
+
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+  }
 }
 
 uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format asm("d7")) {
-  debug("format: %x",format);
+  //debug("format: %x",format);
   return 0xffffffff;
 }
 
 uint16 get_pitch(register struct RTGBoard* b asm("a0"), uint16 width asm("d0"), uint16 format asm("d7")) {
-  debug("width: %x format: %x",width,format);
+  //debug("width: %x format: %x",width,format);
   return 4096;
 }
 
+// TODO check this again, p96 fiddles with it sometimes
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
-  debug("%lx",addr);
+  //debug("%lx",addr);
   return addr; // direct mapping
 }
 
@@ -228,41 +251,81 @@ uint32 get_pixelclock_hz(register struct RTGBoard* b asm("a0"), struct ModeInfo*
 }
 
 uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d0")) {
-  debug("");
+  debug("state: %d",state);
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+  }
+  
   return state==1;
 }
 
 void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4")) {
-  debug("");
+  //debug("");
   
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    x/=2;
+    w/=2;
+    h--;
+  } else {
+    w--;
+    h--;
+  }
+
   *((uint16*)0x8f0020) = x;
   *((uint16*)0x8f0022) = y;
-  *((uint16*)0x8f0024) = x+w-1;
-  *((uint16*)0x8f0026) = y+h-1;
+  *((uint16*)0x8f0024) = x+w;
+  *((uint16*)0x8f0026) = y+h;
   
   *((uint16*)0x8f0028) = color;
   *((uint16*)0x8f002a) = 0x1; // enable blitter
 }
 
 void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
-  debug("");
+  uint16 blitter_busy = 0;
+  //debug("");
   
-  *((uint16*)0x8f0020) = dx; // write start point
-  *((uint16*)0x8f0022) = dy;
-  *((uint16*)0x8f0024) = dx+w-1; // write end point
-  *((uint16*)0x8f0026) = dy+h-1;
-  *((uint16*)0x8f002c) = x; // read start point
-  *((uint16*)0x8f002e) = y;
-  *((uint16*)0x8f0030) = x+w-1; // read end point
-  *((uint16*)0x8f0032) = y+h-1;
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    dx/=2;
+    x/=2;
+    w/=2;
+    h--;
+  } else {
+    w--;
+    h--;
+  }
+
+  if (dy>y) {
+    *((uint16*)0x8f0020) = dx; // write start point
+    *((uint16*)0x8f0022) = dy;
+    *((uint16*)0x8f0024) = dx+w; // write end point
+    *((uint16*)0x8f0026) = dy+h;
+    *((uint16*)0x8f002c) = x; // read start point
+    *((uint16*)0x8f002e) = y;
+    *((uint16*)0x8f0030) = x+w; // read end point
+    *((uint16*)0x8f0032) = y+h;
+  } else {
+    *((uint16*)0x8f0020) = dx+w; // write start point
+    *((uint16*)0x8f0022) = dy+h;
+    *((uint16*)0x8f0024) = dx; // write end point
+    *((uint16*)0x8f0026) = dy;
+    *((uint16*)0x8f002c) = x+w; // read start point
+    *((uint16*)0x8f002e) = y+h;
+    *((uint16*)0x8f0030) = x; // read end point
+    *((uint16*)0x8f0032) = y;
+  }
   
-  //*((uint16*)0x8f0028) = color;
   *((uint16*)0x8f002a) = 0x2; // enable blitter
+  
+  do {
+    blitter_busy = *((volatile uint16*)0x8f002a);
+  } while(blitter_busy!=0);
 }
 
 void blitter_wait(register struct RTGBoard* b asm("a0")) {
   uint16 blitter_busy = 0;
-  debug("");
+  //debug("");
   do {
     blitter_busy = *((volatile uint16*)0x8f002a);
   } while(blitter_busy!=0);

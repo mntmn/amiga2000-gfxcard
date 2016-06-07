@@ -355,7 +355,7 @@ always @(posedge clk)
               iob_command <= CMD_ACTIVE;
               iob_address <= save_row;
               iob_bank    <= save_bank;
-              ready_for_new   <= 1'b1;
+              //ready_for_new   <= 1'b1;
            end else begin
               iob_command     <= CMD_NOP;
               iob_address     <= 13'b0000000000000;
@@ -373,31 +373,32 @@ always @(posedge clk)
          s_open_in_2: state <= s_open_in_1;
 
          s_open_in_1: begin 
-               // still waiting for row to open
-               if(save_wr == 1'b1) begin
-                  // write
-                  state       <= s_write_1;
-                  iob_dq_hiz  <= 1'b0;
-                  iob_data    <= save_data_in[15:0];
-               end else begin
-                  // read
-                  iob_dq_hiz  <= 1'b1;
-                  state       <= s_read_1;
-               end
-               ready_for_new   <= 1'b1; 
-               got_transaction <= 1'b0;
+            // still waiting for row to open
+            if (save_wr == 1'b1) begin
+              // write
+              state       <= s_write_1;
+              iob_dq_hiz  <= 1'b0;
+              iob_data    <= save_data_in[15:0];
+            end else begin
+              // read
+              iob_dq_hiz  <= 1'b1;
+              state       <= s_read_1;
             end
+            ready_for_new   <= 1'b1; 
+            got_transaction <= 1'b0;
+          end
             
          s_burst_read: begin
            if (!burst) begin
              state <=  s_precharge;
              ready_for_new   <= 1'b1;
+             data_ready_delay[data_ready_delay_high]   <= 1'b0;
            end else begin
              iob_command     <= CMD_NOP;
              iob_dqm     <= 2'b00;
              iob_dq_hiz  <= 1'b1;
              
-             if (save_col==burst_col) begin        // 'b111111000      
+             if (save_col==burst_col) begin        // 'b111111010       
                state       <= s_precharge;
                data_ready_delay[data_ready_delay_high]   <= 1'b0;
                ready_for_new   <= 1'b0;
@@ -511,7 +512,7 @@ always @(posedge clk)
             end
          //-- Closing the row off (this closes all banks)
          s_precharge: begin
-               state                     <= s_idle_in_3;
+               state                     <= s_idle_in_4;
                iob_command               <= CMD_PRECHARGE;
                iob_address[prefresh_cmd] <= 1'b0;
             end
