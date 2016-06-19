@@ -90,10 +90,11 @@ int __UserDevInit(struct Device* dev)
 }
 
 void __UserDevCleanup(void)
-{  
+{
   struct IORequest io = {};
   int i;
-  debug("mnstd __userDevCleanup");
+  SysBase = *(struct ExecBase **)4L;
+  //debug("mnstd __userDevCleanup");
 
   /*for (i = 0; i < SD_UNITS; i++) {
     io.io_Device = SDBase->sd_Device;
@@ -101,6 +102,7 @@ void __UserDevCleanup(void)
     io.io_Flags = 0;
     io.io_Command = 0xffff; // kill unit task
     DoIO(&io);
+    RemTask(&SDBase->sd_Unit[i].sdu_Task);
   }*/
 }
 
@@ -129,12 +131,11 @@ int __UserDevOpen(struct IOExtTD *iotd, ULONG unitnum, ULONG flags)
   return iotd->iotd_Req.io_Error == 0;
 }
 
-int __UserDevClose(struct IOExtTD *iotd)
+void __UserDevClose(struct IOExtTD *iotd)
 {
-  debug("mntsd __UserDevClose");
+  //debug("mntsd __UserDevClose");
   
   iotd->iotd_Req.io_Unit->unit_OpenCnt--;
-  return 1;
 }
 
 LONG SD_PerformIO(struct SDUnit* sdu, struct IORequest *io);
@@ -168,17 +169,17 @@ void __BeginIO(struct IORequest *io) {
   io->io_Flags &= ~IOF_QUICK;
 
   /* Forward to the unit's IO task */
-  debug("Msg %lx (reply %lx) => MsgPort %lx", &io->io_Message, io->io_Message.mn_ReplyPort, sdu->sdu_MsgPort);
+  //debug("Msg %lx (reply %lx) => MsgPort %lx", &io->io_Message, io->io_Message.mn_ReplyPort, sdu->sdu_MsgPort);
   PutMsg(sdu->sdu_MsgPort, &io->io_Message);
 }
 
 ADDTABL_1(__AbortIO,a1);
-LONG __AbortIO(struct IORequest* io) {
+void __AbortIO(struct IORequest* io) {
   //Forbid();
   io->io_Error = IOERR_ABORTED;
   //Permit();
 
-  return 0;
+  //return 0;
 }
 
 void SD_Detect(struct SDUnit *sdu) {
@@ -289,7 +290,7 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
     return 0;
   }
 
-  debug("%s: block=%ld, blocks=%ld", is_write ? "Write" : "Read", block, len);
+  //debug("%s: block=%ld, blocks=%ld", is_write ? "Write" : "Read", block, len);
 
   /* Do the IO */
   if (is_write) {
@@ -298,7 +299,7 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
     sderr = sdcmd_read_blocks(&sdu->sdu_SDCmd, block, data, len);
   }
 
-  debug("sderr=$%02x", sderr);
+  //debug("sderr=$%02x", sderr);
 
   if (sderr) {
     iostd->io_Actual = 0;
@@ -343,7 +344,7 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
   LONG err = IOERR_NOCMD;
   int i;
 
-  debug("PERFORMIO");
+  //debug("PERFORMIO");
 
   if (io->io_Error == IOERR_ABORTED)
     return io->io_Error;
@@ -393,8 +394,6 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     }
 
     geom = data;
-    //memset(geom, 0, len);
-    //for (i=0; i<len; i++) {((char*)geom)[i]=0;};
     bzero(geom, len);
     geom->dg_SectorSize   = sdu->sdu_SDCmd.info.block_size;
     geom->dg_TotalSectors = sdu->sdu_SDCmd.info.blocks;
@@ -446,8 +445,8 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     break;
   }
 
-  debug("io_Actual = %ld", iostd->io_Actual);
-  debug("io_Error = %ld", err);
+  //debug("io_Actual = %ld", iostd->io_Actual);
+  //debug("io_Error = %ld", err);
   return err;
 }
 
@@ -776,10 +775,10 @@ void SD_IOTask() {
 
   SD_Detect(sdu);
   
-  debug("sdu_MsgPort=%lx", sdu->sdu_MsgPort);
+  //debug("sdu_MsgPort=%lx", sdu->sdu_MsgPort);
   PutMsg(mport, &status);
 
-  debug("ReplyPort=%lx%s empty", status.mn_ReplyPort, IsListEmpty(&status.mn_ReplyPort->mp_MsgList) ? "" : " not");
+  //debug("ReplyPort=%lx%s empty", status.mn_ReplyPort, IsListEmpty(&status.mn_ReplyPort->mp_MsgList) ? "" : " not");
   if (status.mn_ReplyPort) {
     WaitPort(status.mn_ReplyPort);
     GetMsg(status.mn_ReplyPort);
@@ -822,15 +821,15 @@ void SD_IOTask() {
     if (!io) continue;
 
     if (io->io_Command == 0xffff) {
-      debug("KILL (ignore)");
+      debug("KILL");
       io->io_Error = 0;
       io->io_Message.mn_Node.ln_Type=NT_MESSAGE;
       ReplyMsg(&io->io_Message);
-      //break;
-      continue;
+      break;
+      //continue;
     }
 
-    debug("");
+    //debug("");
     io->io_Error = SD_PerformIO(sdu, io);
     io->io_Message.mn_Node.ln_Type=NT_MESSAGE;
 
@@ -843,6 +842,7 @@ void SD_IOTask() {
   DeleteMsgPort(mport);
 
   debug("leaving task");
+  Wait(0);
 }
 
 #define PUSH(task, type, value) do {\
@@ -888,7 +888,7 @@ void SD_InitUnit(struct SDBase* broken, int id)
       struct Message *msg;
       int i;
       
-      debug("-> afterCreateMsgPort()");
+      //debug("-> afterCreateMsgPort()");
 
       sdu->sdu_Name[0] = 'S';
       sdu->sdu_Name[1] = 'D';
@@ -902,10 +902,10 @@ void SD_InitUnit(struct SDBase* broken, int id)
 
       /* Initialize the task */
       //memset(utask, 0, sizeof(*utask));
-      debug("zero: %lx",utask);
+      //debug("zero: %lx",utask);
       bzero(utask, 0, sizeof(*utask));
       
-      debug("-> after task zero");
+      //debug("-> after task zero");
             
       utask->tc_Node.ln_Pri = -21;
       utask->tc_Node.ln_Name = &sdu->sdu_Name[0];
@@ -919,7 +919,7 @@ void SD_InitUnit(struct SDBase* broken, int id)
       NEWLIST(&utask->tc_MemEntry);
       utask->tc_UserData = sdu;
 
-      debug("-> after NEWLIST");
+      //debug("-> after NEWLIST");
       AddTask(utask, SD_IOTask, NULL);
       debug("-> after AddTask");
 
@@ -928,11 +928,11 @@ void SD_InitUnit(struct SDBase* broken, int id)
       debug("StartMsg=%lx (%ld)", msg, msg->mn_Length);
       if (msg->mn_Length==0) {
         sdu->sdu_Enabled = 1;
-        debug("%ld is zero, %lx -> %lx",msg->mn_Length,sdu,&sdu->sdu_Enabled);
+        //debug("%ld is zero, %lx -> %lx",msg->mn_Length,sdu,&sdu->sdu_Enabled);
       } else {
         sdu->sdu_Enabled = 0;
       }
-      debug("  ReplyPort=%lx, enabled=%ld", msg->mn_ReplyPort, sdu->sdu_Enabled);
+      //debug("  ReplyPort=%lx, enabled=%ld", msg->mn_ReplyPort, sdu->sdu_Enabled);
       ReplyMsg(msg);
 
       DeleteMsgPort(initport);

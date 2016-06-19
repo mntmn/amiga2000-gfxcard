@@ -129,6 +129,8 @@ wire [7:0] sd_data_out;
 wire [15:0] sd_error;
 wire sd_handshake_out;
 
+wire [15:0] sd_clkdiv;
+
 SdCardCtrl sdcard(
   .clk_i(z_sample_clk),
   .reset_i(sd_reset),
@@ -147,7 +149,9 @@ SdCardCtrl sdcard(
   .sclk_o(SD_SCLK),
   
   .hndShk_i(sd_handshake_in),
-  .hndShk_o(sd_handshake_out)
+  .hndShk_o(sd_handshake_out),
+  
+  .clkdiv_o(sd_clkdiv)
 );
 
 `endif
@@ -180,10 +184,11 @@ assign zXRDY = z_ready;
 
 
 reg display_enable = 1;
-reg [15:0] glitchx_reg = 0; // 8f0012
-reg [15:0] glitchx2_reg = 'h1fd; // 8f0010
-//parameter glitchx_reg = 'h1fa;
-reg  [8:0] ram_burst_col = 'h1fe; //'b111111010; 8f0014
+reg [15:0] glitchx_reg = 'h580; // 8f0012 magic value
+//reg [15:0] glitchx2_reg = 'h1fd; // 8f0010
+parameter glitchx2_reg = 'h1fd;
+//reg  [8:0] 
+parameter ram_burst_col = 'h1fe; //'b111111010; 8f0014
 
 // SDRAM
 SDRAM_Controller_v sdram(
@@ -340,7 +345,7 @@ parameter io_high = 24'hde0010;
 reg [7:0] fetch_delay = 0;
 reg [7:0] read_counter = 0;
 reg [7:0] fetch_delay_value = 'h04; // 8f0004
-reg [7:0] margin_x = 5; // 8f0006
+reg [7:0] margin_x = 8; // 8f0006
 
 //parameter margin_x = 4;
 
@@ -614,9 +619,9 @@ always @(posedge z_sample_clk) begin
             
             'h0a: dataout_time <= data_in[7:0];
             'h06: margin_x <= data_in[7:0];
-            'h10: glitchx2_reg <= data_in[15:0];
+            //'h10: glitchx2_reg <= data_in[15:0];
             'h12: glitchx_reg <= data_in[15:0];
-            'h14: ram_burst_col <= data_in[8:0];
+            //'h14: ram_burst_col <= data_in[8:0];
             
             // blitter regs
             'h20: blitter_x1 <= data_in[10:0];
@@ -669,6 +674,7 @@ always @(posedge z_sample_clk) begin
             'h6c: data <= sd_data_in<<8;
             'h6e: data <= sd_data_out<<8;
             'h70: data <= sd_error;
+            'h72: data <= sd_clkdiv;
             
             default: data <= 'h0000;
           endcase
@@ -795,8 +801,6 @@ always @(posedge z_sample_clk) begin
         fetch_y <= counter_y;
         ram_arbiter_state <= RAM_READY;
         
-        //if (blitter_enable>2) blitter_enable <= 2;
-        
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
         // rect fill blitter
@@ -816,7 +820,7 @@ always @(posedge z_sample_clk) begin
           blitter_enable <= 0;
           //ram_enable <= 0;
         end
-      end else if (blitter_enable>1 && counter_x<1300) begin
+      end else if (blitter_enable>1) begin
         if (blitter_enable==2 && cmd_ready) begin
           // block copy (read)
           if (blitter_curx2!=blitter_x4) begin
@@ -837,18 +841,19 @@ always @(posedge z_sample_clk) begin
             blitter_enable <= 0;
             //ram_enable <= 0;
           end
-        end else if (blitter_enable==3) begin        
+        end else if (blitter_enable==3 && counter_x<glitchx_reg) begin        
           ram_byte_enable <= 'b11;
           ram_addr    <= (blitter_cury2<<11)|blitter_curx2;
           ram_write   <= 0;
           ram_enable  <= 1;
+          
           // block copy (data ready)
           if (data_out_ready) begin
             blitter_copy_rgb <= ram_data_out;
             blitter_enable <= 4;
           end
         end else if (blitter_enable==4) begin
-          if (blitter_curx2>blitter_x4) begin
+          if (blitter_curx2>blitter_x4) begin // TODO sth about "eliminate carry chain branches"
             blitter_curx2 <= blitter_curx2 - 1;
             blitter_curx  <= blitter_curx - 1;
           end else if (blitter_curx2<blitter_x4) begin
@@ -967,7 +972,7 @@ always @(posedge vga_clk) begin
     rgb <= 0;
   end
   
-  if (dvi_blank || (counter_x>=screen_w) || (counter_y>=screen_h)) begin
+  if (dvi_blank || (counter_x>=(screen_w+margin_x)) || (counter_y>=screen_h)) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;

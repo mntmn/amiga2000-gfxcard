@@ -292,35 +292,39 @@ void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1")
     w/=2;
     h--;
   } else {
-    w--;
+    //w--;
     h--;
   }
 
-  if (dy>y) {
-    *((uint16*)0x8f0020) = dx; // write start point
+  if (dy<y) {
     *((uint16*)0x8f0022) = dy;
-    *((uint16*)0x8f0024) = dx+w; // write end point
     *((uint16*)0x8f0026) = dy+h;
-    *((uint16*)0x8f002c) = x; // read start point
     *((uint16*)0x8f002e) = y;
-    *((uint16*)0x8f0030) = x+w; // read end point
     *((uint16*)0x8f0032) = y+h;
   } else {
-    *((uint16*)0x8f0020) = dx+w; // write start point
     *((uint16*)0x8f0022) = dy+h;
-    *((uint16*)0x8f0024) = dx; // write end point
     *((uint16*)0x8f0026) = dy;
-    *((uint16*)0x8f002c) = x+w; // read start point
     *((uint16*)0x8f002e) = y+h;
-    *((uint16*)0x8f0030) = x; // read end point
     *((uint16*)0x8f0032) = y;
+  }
+
+  if (dx<x) {
+    *((uint16*)0x8f0020) = dx; // write start point
+    *((uint16*)0x8f0024) = dx+w; // write end point
+    *((uint16*)0x8f002c) = x; // read start point
+    *((uint16*)0x8f0030) = x+w; // read end point
+  } else {
+    *((uint16*)0x8f0020) = dx+w; // write start point
+    *((uint16*)0x8f0024) = dx; // write end point
+    *((uint16*)0x8f002c) = x+w; // read start point
+    *((uint16*)0x8f0030) = x; // read end point
   }
   
   *((uint16*)0x8f002a) = 0x2; // enable blitter
   
-  do {
+  /*do {
     blitter_busy = *((volatile uint16*)0x8f002a);
-  } while(blitter_busy!=0);
+  } while(blitter_busy!=0);*/
 }
 
 void blitter_wait(register struct RTGBoard* b asm("a0")) {
