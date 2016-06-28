@@ -25,9 +25,9 @@
 
 #include "mntgfx.h"
 
-//#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
+#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
 
-#define debug(x,args...) ;
+//#define debug(x,args...) ;
 
 static struct ExecBase* SysBase;
 static struct Library* GfxBase;
@@ -66,9 +66,11 @@ int InitCard(struct RTGBoard* b) {
   b->controller_type = 3;
   
   //b->flags = (b->flags&0xffff0000);
+  b->flags = 1|(1<<15)|(1<<16); //|(1<<20)|(1<<22)|(1<<23);
+  // 32x32 sprite = 1<<16
   
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
-  b->sprite_flags = b->color_formats;
+  b->sprite_flags = 0; //b->color_formats;
 
   // TODO read from autoconf/expansion.library
   b->memory = (void*)0x600000;
@@ -147,6 +149,11 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_clear_mask = set_clear_mask;
   b->fn_set_read_plane = set_read_plane;
 
+  b->fn_sprite_setup = sprite_setup;
+  b->fn_sprite_xy = sprite_xy;
+  b->fn_sprite_bitmap = sprite_bitmap;
+  b->fn_sprite_colors = sprite_colors;
+
   return 1;
 }
 
@@ -170,7 +177,7 @@ void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), re
 }
 
 void set_memory_mode(register struct RTGBoard* b asm("a0"), register uint16 format asm("d7")) {
-  debug("");
+  //debug("");
 }
 void set_read_plane(register struct RTGBoard* b asm("a0"), uint8 p asm("d0")) {
   debug("");
@@ -192,27 +199,70 @@ void set_clock(register struct RTGBoard* b asm("a0")) {
   debug("");
 }
 void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint16 len asm("d1")) {
-  debug("");
+  int i=0;
+  int j=0;
+  //debug("idx: %d, len: %d",idx,len);
+
+  /*if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+    }*/
+  
+  for (i=0; i<256; i++) {
+    *((uint16*)0x8f0200+i)=b->palette[j];
+    *((uint16*)0x8f0400+i)=b->palette[j+1];
+    *((uint16*)0x8f0600+i)=b->palette[j+2];
+    j+=3;
+  }
 }
 
 void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1"), int16 border asm("d0")) {
-  debug("mntgfx: init_mode");
+  
+  debug("F %lx",b->color_format);
   b->mode_info = m;
   b->border = border;
+
+  *((uint16*)0x8c0000) = b->color_format;
+  *((uint16*)0x8c0002) = 0xbeef;
+  
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else if (b->color_format==9) {
+    *((uint16*)0x8f0002) = 2;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+  }
+
+  *((uint16*)0x8f0006) = m->width;
+  *((uint16*)0x8f0008) = m->height;
+
+  if (m->height>360 || m->width>640) {
+    *((uint16*)0x8f0004) = 0;
+  } else if (m->height>240 || m->width>320) {
+    *((uint16*)0x8f0004) = 1;
+    *((uint16*)0x8f0006) = 2*m->width;
+    *((uint16*)0x8f0008) = 2*m->height;
+  } else {
+    *((uint16*)0x8f0004) = 2;
+    *((uint16*)0x8f0006) = 4*m->width;
+    *((uint16*)0x8f0008) = 4*m->height;
+  }
 }
 
 uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format asm("d7")) {
-  debug("format: %x",format);
+  //debug("format: %x",format);
   return 0xffffffff;
 }
 
 uint16 get_pitch(register struct RTGBoard* b asm("a0"), uint16 width asm("d0"), uint16 format asm("d7")) {
-  debug("width: %x format: %x",width,format);
+  //debug("width: %x format: %x",width,format);
   return 4096;
 }
 
+// TODO check this again, p96 fiddles with it sometimes
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
-  debug("%lx",addr);
+  //debug("%lx",addr);
   return addr; // direct mapping
 }
 
@@ -228,44 +278,189 @@ uint32 get_pixelclock_hz(register struct RTGBoard* b asm("a0"), struct ModeInfo*
 }
 
 uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d0")) {
-  debug("");
+  debug("state: %d",state);
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)0x8f0002) = 0;
+  } else if (b->color_format==9) {
+    *((uint16*)0x8f0002) = 2;
+  } else {
+    *((uint16*)0x8f0002) = 1;
+  }
+  
   return state==1;
 }
 
 void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4")) {
-  debug("");
+  //debug("");
+  uint16 i=0;
+  uint8* ptr;
+  uint8 color8;
   
+  *((uint16*)0x8c0000) = b->color_format;
+  *((uint16*)0x8c0002) = 0xbeef;
+  
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    color8=color;
+    color=(color<<8)|color; // 2 pixels at once
+    *((uint16*)0x8f0028) = color;
+
+    // draw odd lines manually
+    if (x&1) {
+      ptr = (uint8*)0x600000+y*4096+x;
+      for (i=0;i<h;i++) {
+        *ptr=color8;
+        ptr+=4096;
+      }
+      x++;
+      w--;
+    }
+    
+    if (w&1) {
+      ptr = (uint8*)0x600000+y*4096+x+w-1;
+      for (i=0;i<h;i++) {
+        *ptr=color8;
+        ptr+=4096;
+      }
+      w--;
+    }
+
+    x/=2;
+    w/=2;
+    if (w==0) return;
+    w--;
+    h--;
+  } else if (b->color_format==9) {
+    // true color
+    x*=2;
+    w--;
+    w*=2;
+    h--;
+    *((uint16*)0x8f0034) = color>>16; // 32 bit color reg
+    *((uint16*)0x8f0036) = color;
+  } else {
+    w--;
+    h--;
+    *((uint16*)0x8f0028) = color;
+  }
+
   *((uint16*)0x8f0020) = x;
   *((uint16*)0x8f0022) = y;
-  *((uint16*)0x8f0024) = x+w-1;
-  *((uint16*)0x8f0026) = y+h-1;
+  *((uint16*)0x8f0024) = x+w;
+  *((uint16*)0x8f0026) = y+h;
   
-  *((uint16*)0x8f0028) = color;
   *((uint16*)0x8f002a) = 0x1; // enable blitter
 }
 
 void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
-  debug("");
+  uint16 blitter_busy = 0;
+  //debug("");
   
-  *((uint16*)0x8f0020) = dx; // write start point
-  *((uint16*)0x8f0022) = dy;
-  *((uint16*)0x8f0024) = dx+w-1; // write end point
-  *((uint16*)0x8f0026) = dy+h-1;
-  *((uint16*)0x8f002c) = x; // read start point
-  *((uint16*)0x8f002e) = y;
-  *((uint16*)0x8f0030) = x+w-1; // read end point
-  *((uint16*)0x8f0032) = y+h-1;
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    dx/=2;
+    x/=2;
+    w/=2;
+    h--;
+  } else if (b->color_format==9) {
+    x*=2;
+    dx*=2;
+    w*=2;
+    h--;
+  } else {
+    //w--;
+    h--;
+  }
+
+  if (dy<y) {
+    *((uint16*)0x8f0022) = dy;
+    *((uint16*)0x8f0026) = dy+h;
+    *((uint16*)0x8f002e) = y;
+    *((uint16*)0x8f0032) = y+h;
+  } else {
+    *((uint16*)0x8f0022) = dy+h;
+    *((uint16*)0x8f0026) = dy;
+    *((uint16*)0x8f002e) = y+h;
+    *((uint16*)0x8f0032) = y;
+  }
+
+  if (dx<x) {
+    *((uint16*)0x8f0020) = dx; // write start point
+    *((uint16*)0x8f0024) = dx+w; // write end point
+    *((uint16*)0x8f002c) = x; // read start point
+    *((uint16*)0x8f0030) = x+w; // read end point
+  } else {
+    *((uint16*)0x8f0020) = dx+w; // write start point
+    *((uint16*)0x8f0024) = dx; // write end point
+    *((uint16*)0x8f002c) = x+w; // read start point
+    *((uint16*)0x8f0030) = x; // read end point
+  }
   
-  //*((uint16*)0x8f0028) = color;
   *((uint16*)0x8f002a) = 0x2; // enable blitter
+  
+  /*do {
+    blitter_busy = *((volatile uint16*)0x8f002a);
+  } while(blitter_busy!=0);*/
 }
 
 void blitter_wait(register struct RTGBoard* b asm("a0")) {
   uint16 blitter_busy = 0;
-  debug("");
+  //debug("");
   do {
     blitter_busy = *((volatile uint16*)0x8f002a);
   } while(blitter_busy!=0);
+}
+
+void sprite_setup(register struct RTGBoard* b asm("a0"), register uint32 enable asm("d0")) {
+}
+
+void sprite_xy(register struct RTGBoard* b asm("a0")) {
+  *((volatile uint16*)0x8f0040) = b->cursor_x;
+  *((volatile uint16*)0x8f0042) = b->cursor_y;
+  *((volatile uint16*)0x8f0044) = b->cursor_x+(b->cursor_w)-1;
+  *((volatile uint16*)0x8f0046) = b->cursor_y+(b->cursor_h)-1;
+}
+
+void sprite_bitmap(register struct RTGBoard* b asm("a0")) {
+  // sprites are stored as 2-bitplane lines
+  // 0x00000000 0x00000000 <- 1 line
+  uint32* s32;
+  volatile uint32* d32;
+  volatile uint32* d32b;
+  uint16* s16;
+  volatile uint16* d16;
+  volatile uint16* d16b;
+  int y;
+
+  if (0) {
+    s32=(uint32*)b->cursor_sprite_bitmap;
+    d32=(volatile uint32*)0x8f0800;
+    d32b=(volatile uint32*)0x8f0880; // bitplane 2
+
+    for (y=0; y<32; y++) {
+      *d32++ =*s32++;
+      *d32b++=*s32++;
+    }
+  } else {
+    s16=(uint16*)(b->cursor_sprite_bitmap+4);
+    d16=(volatile uint16*)0x8f0800;
+    d16b=(volatile uint16*)0x8f0880; // bitplane 2
+
+    for (y=0; y<32; y++) {
+      *d16++=*s16++;
+      *d16b++=*s16++;
+    }
+  }
+}
+
+void sprite_colors(register struct RTGBoard* b asm("a0"), register uint8 idx asm("d0"),
+  register uint8 red asm("d1"), register uint8 green asm("d2"), register uint8 blue asm("d3")) {
+
+  //debug("%x %x %x %x",idx,red,green,blue);
+  if (idx==2) idx=1;
+  else if (idx==1) idx=2;
+  
+  *((volatile uint16*)(0x8f0922+2*idx))=red;
+  *((volatile uint16*)(0x8f0912+2*idx))=green;
+  *((volatile uint16*)(0x8f0902+2*idx))=blue;
 }
 
 ADDTABL_END();

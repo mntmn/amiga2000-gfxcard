@@ -35,16 +35,14 @@ module SDRAM_Controller_v (
    // command and write port
    cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in,
    // Read data port
-   data_out, data_out_ready, data_out_queue_empty,
+   data_out, data_out_ready, data_out_queue_empty, sdram_state, sdram_btb, burst,
+   burst_col,
    // SDRAM signals
    SDRAM_CLK,  SDRAM_CKE,  SDRAM_CS,   SDRAM_RAS,  SDRAM_CAS,
    SDRAM_WE,   SDRAM_DQM,  SDRAM_ADDR, SDRAM_BA,   SDRAM_DATA
 );
-   //////////////////////////////////
-   /// These need to be checked out
-   //////////////////////////////////
    parameter sdram_column_bits    = 9;     // 
-   parameter sdram_row_bits = 13;
+   parameter sdram_row_bits       = 13;
    parameter sdram_address_width  = 24;    // zzz
    parameter sdram_startup_cycles = 10100; // -- 100us, plus a little more, @ 100MHz
    parameter cycles_per_refresh   = 1524;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
@@ -57,13 +55,11 @@ module SDRAM_Controller_v (
    input  [sdram_address_width-1:0] cmd_address;
    input  [1:0]  cmd_byte_enable;
    input  [15:0] cmd_data_in;
-           
-   //-----------------------------------------------
-   //--!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   //--!! Ensure that all outputs are registered. !!
-   //--!! Check the pinout report to be sure      !!
-   //--!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   //-----------------------------------------------
+   input  [8:0] burst_col;
+   input  burst;
+   output [4:0] sdram_state;
+   output sdram_btb;
+   
    reg [3:0]  iob_command  = CMD_NOP;
    reg [12:0] iob_address  = 13'b0000000000000;
    reg [15:0] iob_data     = 16'b0000000000000000;
@@ -71,14 +67,9 @@ module SDRAM_Controller_v (
    reg iob_cke             = 1'b0;
    reg [1:0]  iob_bank     = 2'b00;
    reg [15:0] data_out_reg;
-   //synthesis attribute IOB of iob_command is "TRUE" 
-   //synthesis attribute IOB of iob_address is "TRUE" 
-   //synthesis attribute IOB of iob_data    is "TRUE" 
-   //synthesis attribute IOB of iob_dqm     is "TRUE" 
-   //synthesis attribute IOB of iob_cke     is "TRUE" 
-   //synthesis attribute IOB of iob_bank    is "TRUE" 
+   
+   
 
-   //reg [15:0] iob_data_next = 16'b0;
    output [15:0] data_out;    assign data_out       = data_out_reg;
 
    reg data_out_ready_reg;
@@ -123,11 +114,13 @@ module SDRAM_Controller_v (
    parameter CMD_REFRESH       = 4'b0001;
    parameter CMD_LOAD_MODE_REG = 4'b0000;
 
-   wire [12:0] MODE_REG; // Reserved, wr bust, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
-   assign      MODE_REG =    {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b000};
+   wire [12:0] MODE_REG;    // Reserved, wr burst, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
+   assign      MODE_REG =        {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b000};
+   
+   wire [12:0] MODE_REG_BURST;    // Reserved, wr burst, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
+   assign      MODE_REG_BURST =  {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b111};
 
-   reg  [15:0] captured_data; 
-   //reg  [15:0] captured_data_last;
+   reg  [15:0] captured_data;
    wire [15:0] sdram_din;
 
    ///////////////////////////////
@@ -138,18 +131,19 @@ module SDRAM_Controller_v (
    parameter s_open_in_2 = 5'b01000, s_open_in_1 = 5'b01001, s_write_1   = 5'b01010, s_write_2   = 5'b01011;
    parameter s_write_3   = 5'b01100, s_read_1    = 5'b01101, s_read_2    = 5'b01110, s_read_3    = 5'b01111;
    parameter s_read_4    = 5'b10000, s_precharge = 5'b10001;
-   parameter s_write_1b = 5'b10010;
+   parameter s_burst_read= 5'b10010;
+   parameter s_open_in_3 = 5'b10011;
+   parameter s_open_in_4 = 5'b10100;
+   parameter s_open_in_5 = 5'b10101;
+   parameter s_open_in_6 = 5'b10110;
+   parameter s_open_in_7 = 5'b10111;
+   parameter s_open_in_8 = 5'b11000;
    reg [4:0] state = s_startup;
+   assign sdram_state = state;
    
    // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
    parameter startup_refresh_max   = 14'b11111111111111;
    reg  [13:0] startup_refresh_count = startup_refresh_max-sdram_startup_cycles;
-
-   // Indicate the need to refresh when the counter is 2048,
-   // Force a refresh when the counter is 4096 - (if a refresh is forced, 
-   // multiple refresshes will be forced until the counter is below 2048
-   wire pending_refresh = 0; //startup_refresh_count[11];  
-   wire forcing_refresh = 0; //startup_refresh_count[12];  
 
    // The incoming address is split into these three values
    wire [12:0] addr_row;
@@ -236,36 +230,25 @@ module SDRAM_Controller_v (
    end 
 
 reg can_back_to_back = 0;
+reg burst_old = 0;
+
+assign sdram_btb = can_back_to_back;
 
 always @(posedge clk) captured_data <= sdram_din;
 
 always @(posedge clk)
    begin
-      //captured_data_last <= captured_data;
-      
-      //------------------------------------------------
-      //-- Default state is to do nothing
-      //------------------------------------------------
-      iob_command     <= CMD_NOP;
-      iob_address     <= 13'b0000000000000;
-      iob_bank        <= 2'b00;
-
-      //------------------------------------------------
-      //-- countdown for initialisation & refresh
-      //------------------------------------------------
       startup_refresh_count <= startup_refresh_count+1;
-                  
-      //-------------------------------------------------------------------
+      
       //-- It we are ready for a new transaction and one is being presented
       //-- then accept it. Also remember what we are reading or writing,
       //-- and if it can be back-to-backed with the last transaction
-      //-------------------------------------------------------------------
       if (ready_for_new == 1'b1 && cmd_enable == 1'b1) begin
-        if(save_bank == addr_bank && save_row == addr_row) 
+        if (save_bank == addr_bank && save_row == addr_row) 
           can_back_to_back <= 1'b1;
         else
           can_back_to_back <= 1'b0;
-
+        
         //$display("%h r: %h c: %h",cmd_address,addr_row,addr_col);
         save_row         <= addr_row;
         save_bank        <= addr_bank;
@@ -282,14 +265,11 @@ always @(posedge clk)
         data_ready_delay <= 0;
       end
 
-      //------------------------------------------------
-      //-- Handle the data coming back from the 
-      //-- SDRAM for the Read transaction
-      //------------------------------------------------
-      data_out_ready_reg <= 1'b0;
       if (data_ready_delay[0] == 1'b1) begin
-         data_out_reg       <= captured_data;
-         data_out_ready_reg <= 1'b1;
+        data_out_reg       <= captured_data;
+        data_out_ready_reg <= 1'b1;
+      end else begin
+        data_out_ready_reg <= 1'b0;
       end
       
       // no more bits in the queue?
@@ -297,10 +277,8 @@ always @(posedge clk)
         data_out_queue_empty_reg <= 1;
       else
         data_out_queue_empty_reg <= 0;
-         
-      //----------------------------------------------------------------------------
+       
       //-- update shift registers used to choose when to present data to/from memory
-      //----------------------------------------------------------------------------
       data_ready_delay <= {1'b0, data_ready_delay[data_ready_delay_high:1]};
          
       case(state) 
@@ -343,11 +321,6 @@ always @(posedge clk)
                   iob_address     <= MODE_REG;
                end
 
-               //------------------------------------------------------
-               //-- if startup is complete then go into idle mode,
-               //-- get prepared to accept a new command, and schedule
-               //-- the first refresh cycle
-               //------------------------------------------------------
                if (startup_refresh_count == 1'b0) begin
                   state           <= s_idle;
                   ready_for_new   <= 1'b1;
@@ -363,49 +336,92 @@ always @(posedge clk)
          s_idle_in_1: state <= s_idle;
 
          s_idle: begin
-           if (got_transaction == 1'b1) begin
+           if (burst == 1 && burst_old == 0) begin
+              // switch burst on
+              iob_command     <= CMD_LOAD_MODE_REG;
+              iob_address     <= MODE_REG_BURST;
+              state <= s_idle_in_6;
+              ready_for_new   <= 1'b1;
+              burst_old <= 1;
+           end else if (burst == 0 && burst_old == 1) begin
+              // switch burst off
+              iob_command     <= CMD_LOAD_MODE_REG;
+              iob_address     <= MODE_REG;
+              state <= s_idle_in_6;
+              ready_for_new   <= 1'b1;
+              burst_old <= 0;
+           end else if (got_transaction == 1'b1) begin
               state       <= s_open_in_2;
               iob_command <= CMD_ACTIVE;
               iob_address <= save_row;
               iob_bank    <= save_bank;
-           end               
+              //ready_for_new   <= 1'b1;
+           end else begin
+              iob_command     <= CMD_NOP;
+              iob_address     <= 13'b0000000000000;
+              iob_bank        <= 2'b00;
+           end
          end
-         //--------------------------------------------
-         //-- Opening the row ready for reads or writes
-         //--------------------------------------------
+         
+         s_open_in_8: state <= s_open_in_7;
+         s_open_in_7: state <= s_open_in_6;
+         s_open_in_6: state <= s_open_in_5;
+         s_open_in_5: state <= s_open_in_4;
+         s_open_in_4: state <= s_open_in_3;
+         s_open_in_3: state <= s_open_in_2;
+         
          s_open_in_2: state <= s_open_in_1;
 
          s_open_in_1: begin 
-               // still waiting for row to open
-               if(save_wr == 1'b1) begin
-                  // write
-                  state       <= s_write_1;
-                  iob_dq_hiz  <= 1'b0;
-                  iob_data    <= save_data_in[15:0];
-               end else begin
-                  // read
-                  iob_dq_hiz  <= 1'b1;
-                  state       <= s_read_1;
-               end
-               // we will be ready for a new transaction next cycle!
-               ready_for_new   <= 1'b1; 
-               got_transaction <= 1'b0;                  
+            // still waiting for row to open
+            if (save_wr == 1'b1) begin
+              // write
+              state       <= s_write_1;
+              iob_dq_hiz  <= 1'b0;
+              iob_data    <= save_data_in[15:0];
+            end else begin
+              // read
+              iob_dq_hiz  <= 1'b1;
+              state       <= s_read_1;
             end
-         //----------------------------------
-         //-- Processing the read transaction
-         //----------------------------------
+            ready_for_new   <= 1'b1; 
+            got_transaction <= 1'b0;
+          end
+            
+         s_burst_read: begin
+           if (!burst) begin
+             state <=  s_precharge;
+             ready_for_new   <= 1'b1;
+             data_ready_delay[data_ready_delay_high]   <= 1'b0;
+           end else begin
+             iob_command     <= CMD_NOP;
+             iob_dqm     <= 2'b00;
+             iob_dq_hiz  <= 1'b1;
+             
+             if (save_col==burst_col) begin        // 'b111111010       
+               state       <= s_precharge;
+               data_ready_delay[data_ready_delay_high]   <= 1'b0;
+               ready_for_new   <= 1'b0;
+             end else begin
+               data_ready_delay[data_ready_delay_high]   <= 1'b1;
+               ready_for_new   <= 1'b1;
+             end
+           end
+         end
          s_read_1: begin
-               state           <= s_read_2;
                iob_command     <= CMD_READ;
                iob_address     <= save_col; 
                iob_bank        <= save_bank;
-               iob_address[prefresh_cmd] <= 1'b0; // A10: auto precharge
+               iob_address[prefresh_cmd] <= 1'b0;
+               iob_dqm     <= 2'b00;
                
-               // Schedule reading the data values off the bus
                data_ready_delay[data_ready_delay_high]   <= 1'b1;
                
-               // read all bytes
-               iob_dqm     <= 2'b00;
+               if (burst) begin
+                 ready_for_new <= 1;
+                 state <= s_burst_read; 
+               end else
+                 state <= s_read_2;
             end   
          s_read_2: begin
                state <= s_read_3;
@@ -413,7 +429,7 @@ always @(posedge clk)
                   if (save_wr == 1'b0) begin 
                      // read
                      state           <= s_read_1;
-                     ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
+                     ready_for_new   <= 1'b1;
                      got_transaction <= 1'b0;
                   end
                end
@@ -424,7 +440,7 @@ always @(posedge clk)
                   if (save_wr == 1'b0) begin
                      // read 
                      state           <= s_read_1;
-                     ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
+                     ready_for_new   <= 1'b1;
                      got_transaction <= 1'b0;
                   end
                end
@@ -436,7 +452,7 @@ always @(posedge clk)
                if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
                   if (save_wr == 1'b0) begin 
                      state           <= s_read_1;
-                     ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
+                     ready_for_new   <= 1'b1;
                      got_transaction <= 1'b0;
                   end
                   else
@@ -486,7 +502,7 @@ always @(posedge clk)
                      // write-to-read switch?
                      state           <= s_read_1;
                      iob_dq_hiz      <= 1'b1;
-                     ready_for_new   <= 1'b1; // we will be ready for a new transaction next cycle!
+                     ready_for_new   <= 1'b1;
                      got_transaction <= 1'b0;                  
                   end 
                end else begin
@@ -494,17 +510,13 @@ always @(posedge clk)
                   state              <= s_precharge;
               end
             end
-         //-------------------------------------------------------------------
          //-- Closing the row off (this closes all banks)
-         //-------------------------------------------------------------------
          s_precharge: begin
-               state                     <= s_idle_in_3;
+               state                     <= s_idle_in_4;
                iob_command               <= CMD_PRECHARGE;
-               iob_address[prefresh_cmd] <= 1'b0; // A10 actually matters - it selects all banks or just one
+               iob_address[prefresh_cmd] <= 1'b0;
             end
-         //-------------------------------------------------------------------
          //-- We should never get here, but if we do then reset the memory
-         //-------------------------------------------------------------------
          default: begin 
                state                 <= s_startup;
                ready_for_new         <= 1'b0;

@@ -153,11 +153,11 @@ use Work.common.all;
 entity SdCardCtrl is
 
   generic (
-    FREQ_G          : real       := 180.0;     -- Master clock frequency (MHz).
-    INIT_SPI_FREQ_G : real       := 0.4;  -- Slow SPI clock freq. during initialization (MHz).
+    FREQ_G          : real       := 150.0;     -- Master clock frequency (MHz).
+    INIT_SPI_FREQ_G : real       := 0.25;  -- Slow SPI clock freq. during initialization (MHz).
     SPI_FREQ_G      : real       := 25.0;  -- Operational SPI freq. to the SD card (MHz).
     BLOCK_SIZE_G    : natural    := 512;  -- Number of bytes in an SD card block or sector.
-    CARD_TYPE_G     : CardType_t := SD_CARD_E  -- Type of SD card connected to this controller.
+    CARD_TYPE_G     : CardType_t := SDHC_CARD_E  -- Type of SD card connected to this controller.
     );
     
   port (
@@ -178,7 +178,8 @@ entity SdCardCtrl is
     cs_bo      : out std_logic                     := HI;  -- Active-low chip-select.
     sclk_o     : out std_logic                     := LO;  -- Serial clock to SD card.
     mosi_o     : out std_logic                     := HI;  -- Serial data output to SD card.
-    miso_i     : in  std_logic                     := ZERO  -- Serial data input from SD card.
+    miso_i     : in  std_logic                     := ZERO;  -- Serial data input from SD card.
+    clkdiv_o   : out std_logic_vector(15 downto 0) := (others => NO)
     );
 end entity;
 
@@ -279,6 +280,8 @@ begin
     
   begin
     if rising_edge(clk_i) then
+    
+      clkdiv_o <= std_logic_vector(to_unsigned(clkDivider_v,16));
 
       if reset_i = YES then             -- Perform a reset.
         state_v          := START_INIT;  -- Send the FSM to the initialization entry-point.
