@@ -40,3 +40,9 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
 void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4"));
 void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7"));
 void blitter_wait(register struct RTGBoard* b asm("a0"));
+
+void sprite_setup(register struct RTGBoard* b asm("a0"), register uint32 enable asm("d0"));
+void sprite_xy(register struct RTGBoard* b asm("a0"));
+void sprite_bitmap(register struct RTGBoard* b asm("a0"));
+void sprite_colors(register struct RTGBoard* b asm("a0"), register uint8 idx asm("d0"),
+                   register uint8 red asm("d1"), register uint8 green asm("d2"), register uint8 blue asm("d3"));

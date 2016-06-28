@@ -174,6 +174,7 @@ reg  [15:0] fetch_buffer [0:1299];
 
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_x2 = 0;
+reg  [10:0] fetch_x3 = 0;
 reg  [10:0] fetch_y = 0;
 reg  fetching = 0;
 
@@ -261,6 +262,8 @@ assign sdram_reset = 0;
 reg [11:0] counter_x = 0;
 reg [11:0] counter_y = 0;
 reg [11:0] display_x = 0;
+reg [11:0] display_x2 = 0;
+reg [11:0] display_x3 = 0;
 
 parameter h_rez        = 1280;
 parameter h_sync_start = h_rez+72;
@@ -272,8 +275,8 @@ parameter v_sync_start = v_rez+3;
 parameter v_sync_end   = v_rez+3+5;
 parameter v_max        = 749;
 
-parameter screen_w = 1280;
-parameter screen_h = 720;
+reg [11:0] screen_w = 1280;
+reg [11:0] screen_h = 720;
 
 // zorro port buffers / flags
 
@@ -314,18 +317,31 @@ parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
 parameter lds_bit = q_msb+1;
 parameter uds_bit = q_msb+2;
 //synthesis attribute ram_style of writeq_addr is block
-reg [(q_msb+2):0] writeq_addr [0:max_fill]; // 21=uds 20=lds
+/*reg [(q_msb+2):0] writeq_addr [0:max_fill]; // 21=uds 20=lds
 reg [15:0] writeq_data [0:max_fill-1];
 reg [12:0] writeq_fill = 0;
-reg [12:0] writeq_drain = 0;
+reg [12:0] writeq_drain = 0;*/
 
 reg [7:0] palette_r [0:255];
 reg [7:0] palette_g [0:255];
 reg [7:0] palette_b [0:255];
 
-// 0 == 32 bit
+reg [15:0] sprite_a1 [0:127];
+reg [15:0] sprite_a2 [0:127];
+reg [10:0] sprite_ax = 0;
+reg [10:0] sprite_ay = 0;
+reg [10:0] sprite_ax2 = 15;
+reg [10:0] sprite_ay2 = 15;
+reg [7:0] sprite_ptr  = 0;
+reg [4:0] sprite_bit = 15;
+reg [1:0] sprite_pidx = 0;
+reg [7:0] sprite_palette_r [0:3];
+reg [7:0] sprite_palette_g [0:3];
+reg [7:0] sprite_palette_b [0:3];
+
+// 0 == 8 bit
 // 1 == 16 bit
-// 2 == 8 bit
+// 2 == 32 bit
 reg [1:0] colormode = 1;
 reg [1:0] scalemode = 0;
 
@@ -336,9 +352,10 @@ parameter rom_high = 24'he80080;
 reg [23:0] ram_low  = 24'h600000;
 parameter ram_size = 24'h2d0000;
 parameter reg_base = 24'h2f0000;
+parameter reg_size = 24'h001000;
 reg [23:0] ram_high = 24'h600000 + ram_size;
 reg [23:0] reg_low  = 24'h600000 + reg_base;
-reg [23:0] reg_high = 24'h600800 + reg_base;
+reg [23:0] reg_high = 24'h600000 + reg_base + reg_size;
 parameter io_low  = 24'hde0000;
 parameter io_high = 24'hde0010;
 
@@ -366,6 +383,8 @@ reg [10:0] blitter_x4 = 'h100; // 30
 reg [10:0] blitter_y4 = 'h100; // 32
 reg [15:0] blitter_rgb = 'h0008; // 28
 reg [15:0] blitter_copy_rgb = 'h0000;
+reg [15:0] blitter_rgb32 [0:1];
+reg blitter_rgb32_t = 1;
 reg [3:0]  blitter_enable = 1; // 2a
 reg [10:0] blitter_curx = 0;
 reg [10:0] blitter_cury = 0;
@@ -398,8 +417,8 @@ parameter WAIT_WRITE2 = 6;
 parameter WAIT_READ2 = 7;
 parameter CONFIGURED = 8;
 reg [6:0] zorro_state = CONFIGURED;
-wire [23:0] zaddr_regpart;
-wire [23:0] zaddr_byte;
+//wire [23:0] zaddr_regpart;
+//wire [23:0] zaddr_byte;
 
 assign datastrobe_synced = ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)));
 assign zaddr_in_ram = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=ram_low && zaddr_sync2<ram_high);
@@ -407,8 +426,10 @@ assign zaddr_in_reg = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr &
 assign zaddr_autoconfig = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=rom_low && zaddr_sync2<rom_high);
 assign zorro_read = (zREAD_sync[1]); // & zREAD_sync[0]);
 assign zorro_write = (!zREAD_sync[1]); //& !zREAD_sync[0]);
-assign zaddr_regpart = zaddr_sync2&24'hffff;
-assign zaddr_byte = (zaddr_sync2&24'hfff)>>1;
+wire [15:0] zaddr_regpart = zaddr_sync2[15:0]; //&24'hffff;
+wire [10:0] zaddr_byte = zaddr_sync2[11:1]; // &24'hfff)>>1;
+wire [7:0] zaddr_7f = zaddr_sync2[6:0]; 
+wire [3:0] zaddr_nybble = zaddr_sync2[4:1]; 
 
 reg row_fetched = 0;
 
@@ -493,7 +514,7 @@ always @(posedge z_sample_clk) begin
       ram_low   <= 'h600000;
       ram_high  <= 'h600000 + ram_size;
       reg_low   <= 'h600000 + reg_base;
-      reg_high  <= 'h600000 + reg_base + 'h800;
+      reg_high  <= 'h600000 + reg_base + reg_size;
       
       zorro_state <= CONFIGURING;
     end
@@ -606,7 +627,17 @@ always @(posedge z_sample_clk) begin
         end else if (zorro_write && zaddr_in_reg && datastrobe_synced) begin
           // write to register
           
-          if (zaddr_regpart>='h600) begin
+          if (zaddr_regpart>='h920) begin
+            sprite_palette_r[zaddr_nybble] <= data_in[7:0];
+          end else if (zaddr_regpart>='h910) begin
+            sprite_palette_g[zaddr_nybble] <= data_in[7:0];
+          end else if (zaddr_regpart>='h900) begin
+            sprite_palette_b[zaddr_nybble] <= data_in[7:0];
+          end else if (zaddr_regpart>='h880) begin
+            sprite_a2[zaddr_7f] <= data_in[15:0];
+          end else if (zaddr_regpart>='h800) begin
+            sprite_a1[zaddr_7f] <= data_in[15:0];
+          end else if (zaddr_regpart>='h600) begin
             palette_r[zaddr_byte] <= data_in[7:0];
           end else if (zaddr_regpart>='h400) begin
             palette_g[zaddr_byte] <= data_in[7:0];
@@ -616,9 +647,11 @@ always @(posedge z_sample_clk) begin
           case (zaddr_regpart)
             'h02: colormode <= data_in[1:0];
             'h04: scalemode <= data_in[1:0];
+            'h06: screen_w <= data_in[15:0];
+            'h08: screen_h <= data_in[15:0];
             
             'h0a: dataout_time <= data_in[7:0];
-            'h06: margin_x <= data_in[7:0];
+            'h0c: margin_x <= data_in[7:0];
             //'h10: glitchx2_reg <= data_in[15:0];
             'h12: glitchx_reg <= data_in[15:0];
             //'h14: ram_burst_col <= data_in[8:0];
@@ -635,11 +668,19 @@ always @(posedge z_sample_clk) begin
               blitter_cury <= blitter_y1;
               blitter_curx2 <= blitter_x3;
               blitter_cury2 <= blitter_y3;
+              blitter_rgb32_t <= 1;
             end
             'h2c: blitter_x3 <= data_in[10:0];
             'h2e: blitter_y3 <= data_in[10:0];
             'h30: blitter_x4 <= data_in[10:0];
             'h32: blitter_y4 <= data_in[10:0];
+            'h34: blitter_rgb32[0] <= data_in[15:0];
+            'h36: blitter_rgb32[1] <= data_in[15:0];
+            
+            'h40: sprite_ax <= data_in[10:0];
+            'h42: sprite_ay <= data_in[10:0];
+            'h44: sprite_ax2 <= data_in[10:0];
+            'h46: sprite_ay2 <= data_in[10:0];
             
             // sd card regs
             'h60: sd_reset <= data_in[8];
@@ -790,6 +831,7 @@ always @(posedge z_sample_clk) begin
       
         fetch_x <= fetch_x + 1;
         fetch_x2 <= fetch_x2 + 1;
+        
         fetch_buffer[fetch_x] <= ram_data_out;
       end
     end
@@ -798,11 +840,17 @@ always @(posedge z_sample_clk) begin
       if (need_row_fetch) begin
         row_fetched <= 0;
         fetch_x <= 0;
-        fetch_y <= counter_y;
+        fetch_y <= counter_y>>scalemode;
         ram_arbiter_state <= RAM_READY;
         
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
+      
+        if (colormode==2) begin
+          blitter_rgb <= blitter_rgb32[blitter_rgb32_t];
+          blitter_rgb32_t <= ~blitter_rgb32_t;
+        end
+        
         // rect fill blitter
         if (blitter_curx<=blitter_x2) begin
           blitter_curx <= blitter_curx + 1;
@@ -921,7 +969,8 @@ always @(posedge z_sample_clk) begin
   endcase
 end
 
-reg[23:0] rgb = 'h0000;
+reg[23:0] rgb = 'h000000;
+reg[31:0] rgb32 = 'h00000000;
 reg[11:0] counter_8x = 0;
 reg counter_x_hi = 1;
 reg scale_xc = 0;
@@ -931,6 +980,7 @@ reg[15:0] fetchb1;
 //wire[11:0] fetch_x_next = fetch_x + 1;
 //wire[11:0] fetch_x2_next = fetch_x2 + 1;
 
+wire display_sprite = (counter_x>=sprite_ax && counter_x<=sprite_ax2 && counter_y>=sprite_ay && counter_y<=sprite_ay2);
 
 always @(posedge vga_clk) begin
   if (counter_x >= h_max) begin
@@ -938,15 +988,23 @@ always @(posedge vga_clk) begin
     counter_8x <= margin_x;
     counter_x_hi <= 1;
     display_x <= margin_x;
+    display_x2 <= margin_x<<1;
+    display_x3 <= (margin_x<<1)+1;
     
     if (counter_y == v_max) begin
       counter_y <= 0;
+      
+      sprite_ptr <= 0;
+      sprite_bit <= 15;
     end else
       counter_y <= counter_y + 1;
   end else begin
     counter_x <= counter_x + 1;
     // TODO left margin
     display_x <= display_x + 1;
+    
+    display_x2 <= display_x2 + 2;
+    display_x3 <= display_x2 + 1;
     
     if (counter_x>=h_max-64 && counter_y<screen_h)
       need_row_fetch <= 1;
@@ -972,14 +1030,31 @@ always @(posedge vga_clk) begin
     rgb <= 0;
   end
   
+  if (display_sprite) begin
+    sprite_pidx = {sprite_a1[sprite_ptr][sprite_bit],sprite_a2[sprite_ptr][sprite_bit]};
+    
+    if (sprite_bit==0) begin
+      sprite_bit <= 15;
+      if (sprite_ptr==63) begin
+        sprite_ptr <= 0;
+      end else begin
+        sprite_ptr <= sprite_ptr+1;
+      end
+    end else begin
+      sprite_bit <= sprite_bit-1;
+    end
+  end
+  
+  
   if (dvi_blank || (counter_x>=(screen_w+margin_x)) || (counter_y>=screen_h)) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;
+   
   end else if (colormode==0) begin
     // 0: +0a +0b +1a
     // 1: +0b +1a +1b
-    fetchb1 <= fetch_buffer[counter_8x];
+    fetchb1 <= fetch_buffer[counter_8x>>scalemode];
     
     if (counter_x_hi) begin
       pidx   <= fetchb1[7:0];
@@ -987,43 +1062,68 @@ always @(posedge vga_clk) begin
     end else begin
       pidx   <= fetchb1[15:8];
       counter_x_hi <= 1;
-      counter_8x <= counter_8x + 1;
+      counter_8x <= counter_8x+1;
     end
     
-    red_p <= palette_r[pidx];
-    green_p <= palette_g[pidx];
-    blue_p <= palette_b[pidx];
+    if (!display_sprite || sprite_pidx==0) begin
+      red_p   <= palette_r[pidx];
+      green_p <= palette_g[pidx];
+      blue_p  <= palette_b[pidx];
+    end else begin
+      red_p   <= sprite_palette_r[sprite_pidx];
+      green_p <= sprite_palette_g[sprite_pidx];
+      blue_p  <= sprite_palette_b[sprite_pidx];
+    end
     
   end else if (colormode==1) begin
     // decode 16 to 24 bit color
-    rgb <= fetch_buffer[display_x];
+    rgb <= fetch_buffer[display_x>>scalemode];
     
-    red_p[0] <= rgb[0];
-    red_p[1] <= rgb[0];
-    red_p[2] <= rgb[1];
-    red_p[3] <= rgb[1];
-    red_p[4] <= rgb[2];
-    red_p[5] <= rgb[2];
-    red_p[6] <= rgb[3];
-    red_p[7] <= rgb[4];
+    if (!display_sprite || sprite_pidx==0) begin
+      red_p[0] <= rgb[0];
+      red_p[1] <= rgb[0];
+      red_p[2] <= rgb[1];
+      red_p[3] <= rgb[1];
+      red_p[4] <= rgb[2];
+      red_p[5] <= rgb[2];
+      red_p[6] <= rgb[3];
+      red_p[7] <= rgb[4];
+      
+      green_p[0] <= rgb[5];
+      green_p[1] <= rgb[5];
+      green_p[2] <= rgb[6];
+      green_p[3] <= rgb[6];
+      green_p[4] <= rgb[7];
+      green_p[5] <= rgb[8];
+      green_p[6] <= rgb[9];
+      green_p[7] <= rgb[10];
+      
+      blue_p[0] <= rgb[11];
+      blue_p[1] <= rgb[11];
+      blue_p[2] <= rgb[12];
+      blue_p[3] <= rgb[12];
+      blue_p[4] <= rgb[13];  
+      blue_p[5] <= rgb[13];
+      blue_p[6] <= rgb[14];
+      blue_p[7] <= rgb[15];
+    end else begin
+      red_p   <= sprite_palette_r[sprite_pidx];
+      green_p <= sprite_palette_g[sprite_pidx];
+      blue_p  <= sprite_palette_b[sprite_pidx];
+    end
+  end else if (colormode==2) begin
+    // true color!
+    rgb32 <= {fetch_buffer[(display_x2>>scalemode)],fetch_buffer[(display_x2>>scalemode)+1]};
     
-    green_p[0] <= rgb[5];
-    green_p[1] <= rgb[5];
-    green_p[2] <= rgb[6];
-    green_p[3] <= rgb[6];
-    green_p[4] <= rgb[7];
-    green_p[5] <= rgb[8];
-    green_p[6] <= rgb[9];
-    green_p[7] <= rgb[10];
-    
-    blue_p[0] <= rgb[11];
-    blue_p[1] <= rgb[11];
-    blue_p[2] <= rgb[12];
-    blue_p[3] <= rgb[12];
-    blue_p[4] <= rgb[13];  
-    blue_p[5] <= rgb[13];
-    blue_p[6] <= rgb[14];
-    blue_p[7] <= rgb[15];
+    if (!display_sprite || sprite_pidx==0) begin
+      red_p <= rgb32[15:8];
+      green_p <= rgb32[7:0];
+      blue_p <= rgb32[31:24];
+    end else begin
+      red_p   <= sprite_palette_r[sprite_pidx];
+      green_p <= sprite_palette_g[sprite_pidx];
+      blue_p  <= sprite_palette_b[sprite_pidx];
+    end
   end
 end
 

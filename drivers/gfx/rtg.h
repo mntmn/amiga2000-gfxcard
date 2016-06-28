@@ -56,7 +56,23 @@ enum RTG_COLOR_MODES {
 #define RTG_COLOR_FORMAT_RGB555 1024
 #define RTG_COLOR_FORMAT_BGR565_WEIRD3 2048
 #define RTG_COLOR_FORMAT_BGR565_WEIRD4 4096
+#define RTG_COLOR_FORMAT_32BIT (RTG_COLOR_FORMAT_ARGB|RTG_COLOR_FORMAT_ABGR|RTG_COLOR_FORMAT_RGBA|RTG_COLOR_FORMAT_BGRA)
 
+struct ModeInfo {
+  void* succ;
+  void* pred;
+  uint8 type;
+  uint8 pri;
+
+  void* unknown;
+
+  uint16 open_count;
+  uint16 active;
+  uint16 width;
+  uint16 height;
+  uint8 depth;
+  uint8 flags;
+};
 
 struct RTGBoard {
   void* registers;
