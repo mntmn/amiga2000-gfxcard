@@ -33,34 +33,37 @@
 uint16 sdcmd_read_blocks(void* cmd, uint32 block, uint8* data, uint32 len) {
   uint32 i=0;
   uint32 x=0;
-  uint32 j=len;
-  uint32 base = block;
-  uint32 timeout=0;
-  uint32 y=0;
+  uint32 offset=0;
+  uint8 rbyte=0;
+  //uint32 checksum=0;
   //return 0;
 
-  kprintf("SD read blocks: %ld (%ld)\n",block,len);
+  //kprintf("SD read blocks: %ld (%ld)\n",block,len);
 
   *SD_WRITE = 0;
   *SD_READ = 0;
   *SD_HANDSHAKE = 0x00;
   
-  for (i=0; i<j; i++) {
-    *SD_ADDR = base+i;
+  for (i=0; i<len; i++) {
+    *SD_ADDR = block+i;
     *SD_HANDSHAKE = 0x00;
     *SD_READ = 0xffff;
-
+    offset = i<<9;
+    
     while (!*SD_BUSY) {};
 
+    //checksum=0;
     for (x=0; x<512; x++) {
-      //printf("x: %d ",x);
       while (!*SD_HANDSHAKE) {};
       *SD_READ = 0;
-      data[(i<<9)+x] = *SD_DATA_OUT;
+      rbyte = *SD_DATA_OUT;
+      data[offset+x] = rbyte;
+      //checksum+=rbyte;
       *SD_HANDSHAKE = 0xffff;
       while (*SD_HANDSHAKE) {};
       *SD_HANDSHAKE = 0x00;
     }
+    //kprintf("BLK %ld: %lx\n",block+i,checksum);
   }
   *SD_READ = 0;
   return *SD_ERR;
@@ -73,7 +76,7 @@ uint16 sdcmd_write_blocks(void* cmd, uint32 block, uint8* data, uint32 len) {
   uint32 base = block;
   //return 0;
   
-  kprintf("SD write blocks: %ld (%ld)\n",block,len);
+  //kprintf("SD write blocks: %ld (%ld)\n",block,len);
   
   *SD_WRITE = 0;
   *SD_READ = 0;

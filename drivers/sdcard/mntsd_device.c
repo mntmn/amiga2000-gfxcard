@@ -32,6 +32,7 @@
 #include <exec/alerts.h>
 #include <exec/tasks.h>
 #include <exec/io.h>
+#include <exec/execbase.h>
 
 #include <libraries/expansion.h>
 
@@ -55,46 +56,47 @@ const UWORD DevRevision=0;
 
 #include "mntsd_cmd.h"
 
-static struct ExecBase *SysBase;
-static struct SDBase* SDBase;
+struct SDBase* SDBase;
 
-static int task_running = 0;
+//static int task_running = 0;
 
 #define SD_HEADS    16
 #define SD_SECTORS  64
 #define SD_RETRY 300
 
-//#define debug(x,args...) while(0){};
+#define debug(x,args...) while(0){};
 
-#define bug(x,args...) kprintf(x ,##args);
-#define debug(x,args...) bug("%s:%ld " x "\n", __func__, (unsigned long)__LINE__ ,##args)
+//#define bug(x,args...) kprintf(x ,##args);
+//#define debug(x,args...) bug("%s:%ld " x "\n", __func__, (unsigned long)__LINE__ ,##args)
 
 void SD_InitUnit(struct SDBase * SDBase, int id);
 
 int __UserDevInit(struct Device* dev)
 {
-  struct Library *ExpansionBase;
+  struct Library* ExpansionBase;
   ULONG i;
-
-  SysBase = *(struct ExecBase **)4L;
-  task_running = 0;
+  struct ExecBase* SysBase = *(struct ExecBase **)4L;
+  //task_running = 0;
 
   SDBase = AllocVec(sizeof(struct SDBase), MEMF_CLEAR);
 
-  debug("mntsd __UserDevInit, alloc sdbase: %lx (%ld bytes)",SDBase,sizeof(struct SDBase));
+  debug("__UserDevInit, alloc sdbase: %lx (%ld bytes)",SDBase,sizeof(struct SDBase));
+  if (!SDBase) return 0;
+
   SDBase->sd_Device = dev;
+  dev->dd_Library.lib_Flags |= LIBF_DELEXP;
   
   for (i = 0; i < SD_UNITS; i++) SD_InitUnit(SDBase, i);
 
   return 1;
 }
 
-void __UserDevCleanup(void)
+int __UserDevCleanup(void)
 {
   struct IORequest io = {};
   int i;
-  SysBase = *(struct ExecBase **)4L;
-  //debug("mnstd __userDevCleanup");
+  struct ExecBase* SysBase = *(struct ExecBase **)4L;
+  //debug("__userDevCleanup");
 
   /*for (i = 0; i < SD_UNITS; i++) {
     io.io_Device = SDBase->sd_Device;
@@ -104,26 +106,27 @@ void __UserDevCleanup(void)
     DoIO(&io);
     RemTask(&SDBase->sd_Unit[i].sdu_Task);
   }*/
+  return 0;
 }
 
 int __UserDevOpen(struct IOExtTD *iotd, ULONG unitnum, ULONG flags)
 {
   //struct SDBase* SDBase = &SDBaseStruct;
-  debug("mntsd __UserDevOpen: %ld, sdbase: %lx",unitnum,SDBase);
+  debug("__UserDevOpen: %ld, sdbase: %lx",unitnum,SDBase);
 
+  if (!iotd) return 0;
+  
   iotd->iotd_Req.io_Error = IOERR_OPENFAIL;
-  debug("");
   if (unitnum < SD_UNITS) {
     struct SDUnit *sdu;
 
-    debug("");
     iotd->iotd_Req.io_Device = SDBase->sd_Device;
     iotd->iotd_Req.io_Error = 0;
 
-    debug("");
     sdu = &SDBase->sd_Unit[unitnum];
+    if (!sdu) return 0;
+    
     if (sdu->sdu_Enabled) {
-      debug("");
       sdu->sdu_Unit.unit_OpenCnt++;
     }
   }
@@ -131,24 +134,32 @@ int __UserDevOpen(struct IOExtTD *iotd, ULONG unitnum, ULONG flags)
   return iotd->iotd_Req.io_Error == 0;
 }
 
-void __UserDevClose(struct IOExtTD *iotd)
+int __UserDevClose(struct IOExtTD *iotd)
 {
   //debug("mntsd __UserDevClose");
+  //if (!iotd) return;
+  //if (!iotd->iotd_Req.io_Unit) return;
   
-  iotd->iotd_Req.io_Unit->unit_OpenCnt--;
+  //iotd->iotd_Req.io_Unit->unit_OpenCnt--;
+
+  return 0;
 }
 
 LONG SD_PerformIO(struct SDUnit* sdu, struct IORequest *io);
 
 ADDTABL_1(__BeginIO,a1);
 void __BeginIO(struct IORequest *io) {
-  //struct Library *SysBase = SDBase->sd_ExecBase;
-  struct SDUnit *sdu = &SDBase->sd_Unit[0]; // (struct SDUnit *)io->io_Unit;
-
+  struct SDUnit* sdu;
+  struct ExecBase* SysBase = *(struct ExecBase **)4L;
+  
+  if (!SDBase) return;
+  sdu = &SDBase->sd_Unit[0]; // (struct SDUnit *)io->io_Unit;
+  if (!sdu) return;
+  if (!io) return;
+  
   //debug("io_Command = %ld, io_Flags = 0x%lx", io->io_Command, io->io_Flags);
 
   if (io->io_Flags & IOF_QUICK) {
-    //debug("quick!");
     /* Commands that don't require any IO */
     switch(io->io_Command)
     {
@@ -166,27 +177,31 @@ void __BeginIO(struct IORequest *io) {
   }
 
   /* Not done quick */
-  io->io_Flags &= ~IOF_QUICK;
+  //io->io_Flags &= ~IOF_QUICK;
 
   /* Forward to the unit's IO task */
   //debug("Msg %lx (reply %lx) => MsgPort %lx", &io->io_Message, io->io_Message.mn_ReplyPort, sdu->sdu_MsgPort);
-  PutMsg(sdu->sdu_MsgPort, &io->io_Message);
+  //PutMsg(sdu->sdu_MsgPort, &io->io_Message);
+
+  SD_PerformIO(sdu, io);
 }
 
 ADDTABL_1(__AbortIO,a1);
 void __AbortIO(struct IORequest* io) {
-  //Forbid();
+  if (!io) return;
   io->io_Error = IOERR_ABORTED;
-  //Permit();
-
-  //return 0;
 }
 
 void SD_Detect(struct SDUnit *sdu) {
   BOOL present;
-  //debug("mntsd SD_Detect");
+  struct ExecBase* SysBase = *(struct ExecBase **)4L;
 
-  /* Update sdu_Present, regardless */
+  debug("sdu: %lx\n",sdu);
+  if (!sdu) {
+    debug("");
+    return;
+  }
+  
   present = sdcmd_present(&sdu->sdu_SDCmd);
   if (present != sdu->sdu_Present) {
     if (present) {
@@ -194,26 +209,25 @@ void SD_Detect(struct SDUnit *sdu) {
 
       sderr = sdcmd_detect(&sdu->sdu_SDCmd);
       
-      debug("--> present, sdu %lx",sdu);
-
-      //Forbid();
+      Forbid();
       sdu->sdu_Present = TRUE;
       sdu->sdu_ChangeNum++;
       sdu->sdu_Valid = (sderr == 0) ? TRUE : FALSE;
-      //Permit();
-      
-      debug("========= sdu_Valid: %s", sdu->sdu_Valid ? "TRUE" : "FALSE");
-      debug("========= Blocks: %ld", sdu->sdu_SDCmd.info.blocks);
+      Permit();
     } else {
-      //Forbid();
+      Forbid();
       sdu->sdu_Present = FALSE;
       sdu->sdu_Valid = FALSE;
-      //Permit();
+      Permit();
     }
   }
 }
 
 #define CMD_NAME(x) if (cmd == x) return #x
+#define TD_READ64     24
+#define TD_WRITE64    25
+#define TD_SEEK64     26
+#define TD_FORMAT64   27
 
 inline const char *cmd_name(int cmd)
 {
@@ -230,9 +244,9 @@ inline const char *cmd_name(int cmd)
   CMD_NAME(TD_GETGEOMETRY);
   CMD_NAME(TD_MOTOR);
   CMD_NAME(TD_PROTSTATUS);
-  //CMD_NAME(TD_READ64);
+  CMD_NAME(TD_READ64);
   CMD_NAME(TD_REMCHANGEINT);
-  //CMD_NAME(TD_WRITE64);
+  CMD_NAME(TD_WRITE64);
   CMD_NAME(HD_SCSICMD);
 
   return "Unknown";
@@ -244,12 +258,16 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
 {
   struct IOStdReq *iostd = (struct IOStdReq *)io;
   struct IOExtTD *iotd = (struct IOExtTD *)io;
-  //struct SDUnit *sdu = (struct SDUnit *)io->io_Unit;
-  //struct SDUnit *sdu = &SDBase->sd_Unit[0]; // (struct SDUnit *)io->io_Unit;
-  APTR data = iotd->iotd_Req.io_Data;
-  ULONG len = iotd->iotd_Req.io_Length;
+  
+  APTR data;
+  ULONG len;
   ULONG block, block_size, bmask;
   UBYTE sderr;
+
+  if (!sdu || !io) return 0;
+  
+  data = iotd->iotd_Req.io_Data;
+  len = iotd->iotd_Req.io_Length;
 
   /*kprintf("%s: Flags: $%lx, Command: $%04lx, Offset: $%lx%08lx Length: %5ld, Data: $%08lx\n",
         is_write ? "write" : "read",
@@ -259,24 +277,23 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
   block_size = sdu->sdu_SDCmd.info.block_size;
   bmask = block_size - 1;
 
-  /* Read/Write is not permitted if the unit is not Valid */
   if (!sdu->sdu_Valid) {
-    kprintf("TDERR_BadDriveType\n");
+    //kprintf("TDERR_BadDriveType\n");
     return TDERR_BadDriveType;
   }
   
   if (sdu->sdu_ReadOnly) {
-    kprintf("TDERR_WriteProt\n");
+    //kprintf("TDERR_WriteProt\n");
     return TDERR_WriteProt;
   }
   
   if ((off64 & bmask) || bmask == 0 || data == NULL) {
-    kprintf("IOERR_BADADDRESS\n");
+    //kprintf("IOERR_BADADDRESS\n");
     return IOERR_BADADDRESS;
   }
   
   if ((len & bmask) || len == 0) {
-    kprintf("IO %lx Fault, io_Flags = %ld, io_Command = %ld, IOERR_BADLENGTH (len=0x%lx, bmask=0x%lx)\n", io, io->io_Flags, io->io_Command, len, bmask);
+    //kprintf("IO %lx Fault, io_Flags = %ld, io_Command = %ld, IOERR_BADLENGTH (len=0x%lx, bmask=0x%lx)\n", io, io->io_Flags, io->io_Command, len, bmask);
     return IOERR_BADLENGTH;
   }
 
@@ -285,12 +302,10 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
   block = off64 >> 9;
 
   /* Nothing to do... */
-  if (len == 0) {
+  if (len < 1) {
     iostd->io_Actual = 0;
     return 0;
   }
-
-  //debug("%s: block=%ld, blocks=%ld", is_write ? "Write" : "Read", block, len);
 
   /* Do the IO */
   if (is_write) {
@@ -298,8 +313,6 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
   } else {
     sderr = sdcmd_read_blocks(&sdu->sdu_SDCmd, block, data, len);
   }
-
-  //debug("sderr=$%02x", sderr);
 
   if (sderr) {
     iostd->io_Actual = 0;
@@ -337,17 +350,33 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
   struct ExecBase* SysBase = *(struct ExecBase **)4L;
   struct IOStdReq *iostd = (struct IOStdReq *)io;
   struct IOExtTD *iotd = (struct IOExtTD *)io;
-  APTR data = iotd->iotd_Req.io_Data;
-  ULONG len = iotd->iotd_Req.io_Length;
+  APTR data;
+  ULONG len;
   ULONG off64;
   struct DriveGeometry *geom;
   LONG err = IOERR_NOCMD;
   int i;
 
-  //debug("PERFORMIO");
+  sdu = &SDBase->sd_Unit[0];
+  
+  debug("sdu: %lx io: %lx",sdu,io);
+  
+  if (!io) return 0;
+  if (!sdu) return 0;
+  if (!sdu->sdu_Enabled) {
+    debug("");
+    return 0;
+  }
 
-  if (io->io_Error == IOERR_ABORTED)
+  data = iotd->iotd_Req.io_Data;
+  len = iotd->iotd_Req.io_Length;
+
+  if (io->io_Error == IOERR_ABORTED) {
+    debug("IOERR_ABORTED\n");
     return io->io_Error;
+  }
+
+  debug("cmd: %s",cmd_name(io->io_Command));
 
   //debug("IO %lx Start, io_Flags = %ld, io_Command = %ld (%s)", io, io->io_Flags, io->io_Command, cmd_name(io->io_Command));
   
@@ -370,17 +399,17 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     break;
   case TD_REMOVE:
   case TD_CHANGESTATE:
-    //Forbid();
+    Forbid();
     iostd->io_Actual = sdu->sdu_Present ? 0 : 1;
-    //Permit();
+    Permit();
     err = 0;
     break;
   case TD_EJECT:
     // Eject removable media
     // We mark is as invalid, then wait for Present to toggle.
-    //Forbid();
+    Forbid();
     sdu->sdu_Valid = FALSE;
-    //Permit();
+    Permit();
     err = 0;
     break;
   case TD_GETDRIVETYPE:
@@ -388,13 +417,13 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     err = 0;
     break;
   case TD_GETGEOMETRY:
-    if (len < sizeof(*geom)) {
+    if (len < sizeof(struct DriveGeometry)) {
       err = IOERR_BADLENGTH;
       break;
     }
 
     geom = data;
-    bzero(geom, len);
+    bzero(geom, sizeof(struct DriveGeometry));
     geom->dg_SectorSize   = sdu->sdu_SDCmd.info.block_size;
     geom->dg_TotalSectors = sdu->sdu_SDCmd.info.blocks;
     geom->dg_Cylinders    = sdu->sdu_SDCmd.info.blocks >> 10;
@@ -404,7 +433,7 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     geom->dg_BufMemType   = MEMF_PUBLIC;
     geom->dg_DeviceType   = DG_DIRECT_ACCESS;
     geom->dg_Flags        = DGF_REMOVABLE;
-    iostd->io_Actual = sizeof(*geom);
+    iostd->io_Actual = sizeof(struct DriveGeometry);
     err = 0;
     break;
   case TD_FORMAT:
@@ -412,7 +441,6 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     err = SD_ReadWrite(sdu, io, off64, TRUE);
     break;
   case TD_MOTOR:
-    // FIXME: Tie in with power management
     iostd->io_Actual = sdu->sdu_Motor;
     sdu->sdu_Motor = iostd->io_Length ? 1 : 0;
     err = 0;
@@ -421,22 +449,21 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
     off64  = iotd->iotd_Req.io_Offset;
     err = SD_ReadWrite(sdu, io, off64, TRUE);
     break;
-    /*case TD_WRITE64:
-      off64  = iotd->iotd_Req.io_Offset;
-      off64 |= ((ULONG)iotd->iotd_Req.io_Actual)<<32;
-      err = SD_ReadWrite(io, off64, TRUE);
-      break;*/
+  case TD_WRITE64:
+    off64  = iotd->iotd_Req.io_Offset;
+    //off64 |= ((ULONG)iotd->iotd_Req.io_Actual)<<32;
+    err = SD_ReadWrite(sdu, io, off64, TRUE);
+    break;
   case CMD_READ:
     off64  = iotd->iotd_Req.io_Offset;
     err = SD_ReadWrite(sdu, io, off64, FALSE);
     break;
-    /*case TD_READ64:
-      off64  = iotd->iotd_Req.io_Offset;
-      off64 |= ((ULONG)iotd->iotd_Req.io_Actual)<<32;
-      err = SD_ReadWrite(io, off64, FALSE);
-      break;*/
+  case TD_READ64:
+    off64  = iotd->iotd_Req.io_Offset;
+    //off64 |= ((ULONG)iotd->iotd_Req.io_Actual)<<32;
+    err = SD_ReadWrite(sdu, io, off64, FALSE);
+    break;
   case HD_SCSICMD:
-    debug("SCSI");
     err = SD_PerformSCSI(sdu, io);
     break;
   default:
@@ -446,7 +473,7 @@ LONG SD_PerformIO(struct SDUnit *sdu, struct IORequest *io)
   }
 
   //debug("io_Actual = %ld", iostd->io_Actual);
-  //debug("io_Error = %ld", err);
+  debug("io_Error = %ld", err);
   return err;
 }
 
@@ -465,10 +492,10 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
         iostd->io_Length, scsi->scsi_Command[0],
         scsi->scsi_Command[1], scsi->scsi_Command[2],
         scsi->scsi_CmdLength);
-  if (iostd->io_Length < sizeof(*scsi)) {
+  if (iostd->io_Length < sizeof(struct SCSICmd)) {
     // RDPrep sends a bad io_Length sometimes
-    debug("====== BAD PROGRAM: iostd->io_Length < sizeof(struct SCSICmd)");
-    //return IOERR_BADLENGTH;
+    //debug("====== BAD PROGRAM: iostd->io_Length < sizeof(struct SCSICmd)");
+    return IOERR_BADLENGTH;
   }
 
   if (scsi->scsi_CmdLength < 6)
@@ -531,14 +558,14 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
     block = (block << 8) | scsi->scsi_Command[2];
     block = (block << 8) | scsi->scsi_Command[3];
     blocks = scsi->scsi_Command[4];
-    debug("READ (6) %ld @%ld => $%lx (%ld)",
-          blocks, block, data, scsi->scsi_Length);
+    //debug("READ (6) %ld @%ld => $%lx (%ld)",
+    //      blocks, block, data, scsi->scsi_Length);
     if (block + blocks > sdc->info.blocks) {
       err = IOERR_BADADDRESS;
       break;
     }
     if (scsi->scsi_Length < (blocks << 9)) {
-      debug("Len (%ld) too small (%ld)", scsi->scsi_Length, blocks << 9);
+      //debug("Len (%ld) too small (%ld)", scsi->scsi_Length, blocks << 9);
       err = IOERR_BADLENGTH;
       break;
     }
@@ -560,14 +587,14 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
     block = (block << 8) | scsi->scsi_Command[2];
     block = (block << 8) | scsi->scsi_Command[3];
     blocks = scsi->scsi_Command[4];
-    debug("WRITE (6) %ld @%ld => $%lx (%ld)",
-          blocks, block, data, scsi->scsi_Length);
+    /*debug("WRITE (6) %ld @%ld => $%lx (%ld)",
+      blocks, block, data, scsi->scsi_Length);*/
     if (block + blocks > sdc->info.blocks) {
       err = IOERR_BADADDRESS;
       break;
     }
     if (scsi->scsi_Length < (blocks << 9)) {
-      debug("Len (%ld) too small (%ld)", scsi->scsi_Length, (blocks << 9));
+      //debug("Len (%ld) too small (%ld)", scsi->scsi_Length, (blocks << 9));
       err = IOERR_BADLENGTH;
       break;
     }
@@ -589,8 +616,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
       err = HFERR_BadStatus;
       break;
     }
-    debug("");
-
+    
     block = scsi->scsi_Command[2];
     block = (block << 8) | scsi->scsi_Command[3];
     block = (block << 8) | scsi->scsi_Command[4];
@@ -607,7 +633,6 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
       break;
     }
 
-    debug("");
     for (i = 0; i < 4; i++)
       data[0 + i] = (sdc->info.blocks >> (24 - (i<<3))) & 0xff;
     for (i = 0; i < 4; i++)
@@ -616,7 +641,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
     scsi->scsi_Actual = 8;
     err = 0;
 
-    debug("stop: blocks %ld block_size %ld",sdc->info.blocks,sdc->info.block_size);
+    //debug("stop: blocks %ld block_size %ld",sdc->info.blocks,sdc->info.block_size);
     
     break;
   case 0x1a: // MODE SENSE (6)
@@ -674,7 +699,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
           break;
         }
 
-        debug("data[%2ld] = $%02lx", 12 + i, val);
+        //debug("data[%2ld] = $%02lx", 12 + i, val);
         data[12 + i] = val;
       }
 
@@ -710,7 +735,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
         }
 
         data[12 + i] = val;
-        debug("data[%2ld] = $%02lx", 12 + i, val);
+        //debug("data[%2ld] = $%02lx", 12 + i, val);
       }
 
       scsi->scsi_Actual = data[0] + 1;
@@ -733,13 +758,13 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
     iostd->io_Actual = sizeof(*scsi);
   else
     iostd->io_Actual = 0;
-
-  debug("");
     
   return err;
 }
 
 
+
+/*
 void SD_IOTask() {
   struct ExecBase* SysBase = *(struct ExecBase **)4L;
   struct Task *this = FindTask(NULL);
@@ -796,6 +821,8 @@ void SD_IOTask() {
   for (;;) {
     struct IORequest *io;
 
+    //debug("task");
+
     SD_Detect(sdu);
 
     io = (struct IORequest *)GetMsg(mport);
@@ -843,7 +870,7 @@ void SD_IOTask() {
 
   debug("leaving task");
   Wait(0);
-}
+}*/
 
 #define PUSH(task, type, value) do {\
     struct Task *_task = task; \
@@ -861,7 +888,7 @@ void SD_InitUnit(struct SDBase* broken, int id)
   struct ExecBase* SysBase = *(struct ExecBase **)4L;
   struct SDUnit *sdu = &SDBase->sd_Unit[0];
 
-  debug("SD_InitUnit sdbase: %lx sdu: %lx",SDBase,sdu);
+  debug("init sdu: %lx",SDBase,sdu);
 
   switch (id) {
   case 0:
@@ -875,10 +902,12 @@ void SD_InitUnit(struct SDBase* broken, int id)
   //sdu->sdu_SDCmd.func.log = SD_log;
   sdu->sdu_SDCmd.retry.read = SD_RETRY;
   sdu->sdu_SDCmd.retry.write = SD_RETRY;
+  
+  SD_Detect(sdu);
 
   /* If the unit is present, create an IO task for it
    */
-  if (sdu->sdu_Enabled && !task_running) {
+  /*if (sdu->sdu_Enabled && !task_running) {
     struct Task *utask = &sdu->sdu_Task;
     struct MsgPort *initport;
     debug("-> enabled");
@@ -888,8 +917,6 @@ void SD_InitUnit(struct SDBase* broken, int id)
       struct Message *msg;
       int i;
       
-      //debug("-> afterCreateMsgPort()");
-
       sdu->sdu_Name[0] = 'S';
       sdu->sdu_Name[1] = 'D';
       sdu->sdu_Name[2] = 'I';
@@ -899,40 +926,27 @@ void SD_InitUnit(struct SDBase* broken, int id)
       sdu->sdu_Name[5] = 0;
       
       sdu->sdu_MsgPort = initport;
-
-      /* Initialize the task */
-      //memset(utask, 0, sizeof(*utask));
-      //debug("zero: %lx",utask);
       bzero(utask, 0, sizeof(*utask));
-      
-      //debug("-> after task zero");
             
       utask->tc_Node.ln_Pri = -21;
       utask->tc_Node.ln_Name = &sdu->sdu_Name[0];
       utask->tc_SPReg = utask->tc_SPUpper = &sdu->sdu_Stack[SDU_STACK_SIZE];
       utask->tc_SPLower = &sdu->sdu_Stack[0];
 
-      debug("-> after task fillout, sdu_Name: %s",sdu->sdu_Name);
-
       PUSH(utask, struct ExecBase*, SysBase);
 
       NEWLIST(&utask->tc_MemEntry);
       utask->tc_UserData = sdu;
 
-      //debug("-> after NEWLIST");
       AddTask(utask, SD_IOTask, NULL);
-      debug("-> after AddTask");
 
       WaitPort(initport);
       msg = GetMsg(initport);
-      debug("StartMsg=%lx (%ld)", msg, msg->mn_Length);
       if (msg->mn_Length==0) {
         sdu->sdu_Enabled = 1;
-        //debug("%ld is zero, %lx -> %lx",msg->mn_Length,sdu,&sdu->sdu_Enabled);
       } else {
         sdu->sdu_Enabled = 0;
       }
-      //debug("  ReplyPort=%lx, enabled=%ld", msg->mn_ReplyPort, sdu->sdu_Enabled);
       ReplyMsg(msg);
 
       DeleteMsgPort(initport);
@@ -940,10 +954,10 @@ void SD_InitUnit(struct SDBase* broken, int id)
       debug("-> failed CreateMsgPort()");
       sdu->sdu_Enabled = FALSE;
     }
-  }
+  }*/
 
   // SDBase->sd_Unit[id].
-  debug("unit=%ld enabled=%ld", id, sdu->sdu_Enabled);
+  //("unit=%ld enabled=%ld", id, sdu->sdu_Enabled);
 }
 
 
