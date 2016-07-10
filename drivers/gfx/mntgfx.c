@@ -65,13 +65,11 @@ int InitCard(struct RTGBoard* b) {
   b->chip_type = 3;
   b->controller_type = 3;
   
-  //b->flags = (b->flags&0xffff0000);
-  b->flags = 1|(1<<15)|(1<<16); //|(1<<20)|(1<<22)|(1<<23);
-  // 32x32 sprite = 1<<16
+  b->flags = 1|(1<<16); // 0 = has sprite, 16 = 32x32 sprite
   
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
   b->sprite_flags = 0; //b->color_formats;
-
+  
   // TODO read from autoconf/expansion.library
   b->memory = (void*)0x600000;
   //b->memory2 = (void*)0x600000;
