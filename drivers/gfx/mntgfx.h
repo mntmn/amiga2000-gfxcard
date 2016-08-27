@@ -5,6 +5,7 @@
 #include <exec/alerts.h>
 
 #include <libraries/expansion.h>
+#include <libraries/configvars.h>
 
 const char LibName[]="mntgfx.card";
 const char LibIdString[]="mntgfx.card 1.0";

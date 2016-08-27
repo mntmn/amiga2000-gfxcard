@@ -29,8 +29,9 @@
 
 //#define debug(x,args...) ;
 
-static struct ExecBase* SysBase;
-static struct Library* GfxBase;
+struct ExecBase* SysBase;
+struct Library* GfxBase;
+struct Library* ExpansionBase;
 
 int __UserLibInit(struct Library *libBase)
 {
@@ -48,13 +49,30 @@ void __UserLibCleanup(void)
 
 ADDTABL_1(FindCard,a0);
 int FindCard(struct RTGBoard* b) {
+  struct ConfigDev* cd = NULL;
+  
   debug("");
-  return 1;
+  if ((ExpansionBase = (struct Library*)OpenLibrary("expansion.library",0L))==NULL) {
+    debug("failed to open expansion.library!");
+    return 0;
+  }
+
+  if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
+    debug("MNT VA2000 rev 1 found.");
+    b->memory = (uint8*)(cd->cd_BoardAddr);
+    b->memory_size = 0x2f0000;
+    b->registers = (((uint8*)b->memory)+0x2f0000);
+    return 1;
+  } else {
+    debug("MNT VA2000 not found!");
+    return 0;
+  }
 }
 
 ADDTABL_1(InitCard,a0);
 int InitCard(struct RTGBoard* b) {
   int max;
+  int i=0;
 
   debug("mntgfx: InitCard");
   
@@ -65,18 +83,10 @@ int InitCard(struct RTGBoard* b) {
   b->chip_type = 3;
   b->controller_type = 3;
   
-  b->flags = 1|(1<<16); // 0 = has sprite, 16 = 32x32 sprite
+  b->flags = 1|(1<<16)|(1<<20)|(1<<12); // 0 = has sprite, 16 = 32x32 sprite, 20 = display switch, 12 = flickerfix
   
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
   b->sprite_flags = 0; //b->color_formats;
-  
-  // TODO read from autoconf/expansion.library
-  b->memory = (void*)0x600000;
-  //b->memory2 = (void*)0x600000;
-  b->memory_size = 0x2f0000;
-  //b->memory2_size = 0x2d0000;
-  //b->registers = (void*)0x8f0000;
-  //b->io = (void*)0x8f0000;
 
   // TODO true color
   b->bits_per_channel = 6;
@@ -152,6 +162,9 @@ int InitCard(struct RTGBoard* b) {
   b->fn_sprite_bitmap = sprite_bitmap;
   b->fn_sprite_colors = sprite_colors;
 
+  // save scalemode locally
+  b->scratch[0] = 0;
+  
   return 1;
 }
 
@@ -178,19 +191,19 @@ void set_memory_mode(register struct RTGBoard* b asm("a0"), register uint16 form
   //debug("");
 }
 void set_read_plane(register struct RTGBoard* b asm("a0"), uint8 p asm("d0")) {
-  debug("");
+  //debug("");
 }
 void set_write_mask(register struct RTGBoard* b asm("a0"), uint8 m asm("d0")) {
-  debug("");
+  //debug("");
 }
 void set_clear_mask(register struct RTGBoard* b asm("a0"), uint8 m asm("d0")) {
-  debug("");
+  //debug("");
 }
 void vsync_wait(register struct RTGBoard* b asm("a0")) {
-  debug("");
+  //debug("");
 }
 int is_vsynced(register struct RTGBoard* b asm("a0")) {
-  debug("");
+  //debug("");
   return 0;
 }
 void set_clock(register struct RTGBoard* b asm("a0")) {
@@ -200,51 +213,53 @@ void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint
   int i=0;
   int j=0;
   //debug("idx: %d, len: %d",idx,len);
+  uint8* registers = (uint8*)b->registers;
 
-  /*if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
-    *((uint16*)0x8f0002) = 0;
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)(registers+0x48)) = 0;
   } else {
-    *((uint16*)0x8f0002) = 1;
-    }*/
+    *((uint16*)(registers+0x48)) = 1;
+  }
   
   for (i=0; i<256; i++) {
-    *((uint16*)0x8f0200+i)=b->palette[j];
-    *((uint16*)0x8f0400+i)=b->palette[j+1];
-    *((uint16*)0x8f0600+i)=b->palette[j+2];
+    *((uint16*)(registers+0x200)+i)=b->palette[j];
+    *((uint16*)(registers+0x400)+i)=b->palette[j+1];
+    *((uint16*)(registers+0x600)+i)=b->palette[j+2];
     j+=3;
   }
 }
 
 void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1"), int16 border asm("d0")) {
+  uint8* registers = (uint8*)b->registers;
   
-  debug("F %lx",b->color_format);
+  //debug("F %lx",b->color_format);
   b->mode_info = m;
   b->border = border;
-
-  *((uint16*)0x8c0000) = b->color_format;
-  *((uint16*)0x8c0002) = 0xbeef;
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
-    *((uint16*)0x8f0002) = 0;
+    *((uint16*)(registers+0x48)) = 0;
   } else if (b->color_format==9) {
-    *((uint16*)0x8f0002) = 2;
+    *((uint16*)(registers+0x48)) = 2;
   } else {
-    *((uint16*)0x8f0002) = 1;
+    *((uint16*)(registers+0x48)) = 1;
   }
 
-  *((uint16*)0x8f0006) = m->width;
-  *((uint16*)0x8f0008) = m->height;
+  *((uint16*)(registers+6)) = m->width;
+  *((uint16*)(registers+8)) = m->height;
 
   if (m->height>360 || m->width>640) {
-    *((uint16*)0x8f0004) = 0;
+    *((uint16*)(registers+4)) = 0;
+    b->scratch[0] = 0;
   } else if (m->height>240 || m->width>320) {
-    *((uint16*)0x8f0004) = 1;
-    *((uint16*)0x8f0006) = 2*m->width;
-    *((uint16*)0x8f0008) = 2*m->height;
+    b->scratch[0] = 1;
+    *((uint16*)(registers+4)) = 1;
+    *((uint16*)(registers+6)) = 2*m->width;
+    *((uint16*)(registers+8)) = 2*m->height;
   } else {
-    *((uint16*)0x8f0004) = 2;
-    *((uint16*)0x8f0006) = 4*m->width;
-    *((uint16*)0x8f0008) = 4*m->height;
+    b->scratch[0] = 2;
+    *((uint16*)(registers+4)) = 2;
+    *((uint16*)(registers+6)) = 4*m->width;
+    *((uint16*)(registers+8)) = 4*m->height;
   }
 }
 
@@ -276,16 +291,39 @@ uint32 get_pixelclock_hz(register struct RTGBoard* b asm("a0"), struct ModeInfo*
 }
 
 uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d0")) {
-  debug("state: %d",state);
-  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
-    *((uint16*)0x8f0002) = 0;
-  } else if (b->color_format==9) {
-    *((uint16*)0x8f0002) = 2;
+  uint8* registers = (uint8*)b->registers;
+
+  //debug("");
+  debug("%x",state);
+
+  if (state==0) {
+    // clear screen
+    blitter_wait(b);
+    rect_fill(b,0,0,1280,720,0);
+    blitter_wait(b);
+    rect_fill(b,0,0,1280,720,0);
+    blitter_wait(b);
+    
+    // capture amiga video to 16bit
+    *((uint16*)(registers+0x48)) = 1; // colormode
+    *((uint16*)(registers+4)) = 1; // scalemode
+    *((uint16*)(registers+0x46)) = 0; // sprite off
+    *((uint16*)(registers+0x50)) = 0xffff;
   } else {
-    *((uint16*)0x8f0002) = 1;
+    // rtg mode
+    *((uint16*)(registers+0x50)) = 0;
+    *((uint16*)(registers+4)) = b->scratch[0]; // scalemode
+    
+    if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+      *((uint16*)(registers+0x48)) = 0;
+    } else if (b->color_format==9) {
+      *((uint16*)(registers+0x48)) = 2;
+    } else {
+      *((uint16*)(registers+0x48)) = 1;
+    }
   }
   
-  return state==1;
+  return 1-state;
 }
 
 void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4")) {
@@ -293,18 +331,20 @@ void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16
   uint16 i=0;
   uint8* ptr;
   uint8 color8;
+
+  uint8* registers = (uint8*)b->registers;
   
-  *((uint16*)0x8c0000) = b->color_format;
-  *((uint16*)0x8c0002) = 0xbeef;
+  //*((uint16*)0x8c0000) = b->color_format;
+  //*((uint16*)0x8c0002) = 0xbeef;
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
     color8=color;
     color=(color<<8)|color; // 2 pixels at once
-    *((uint16*)0x8f0028) = color;
+    *((uint16*)(registers+0x28)) = color;
 
     // draw odd lines manually
     if (x&1) {
-      ptr = (uint8*)0x600000+y*4096+x;
+      ptr = (uint8*)b->memory+y*4096+x;
       for (i=0;i<h;i++) {
         *ptr=color8;
         ptr+=4096;
@@ -314,7 +354,7 @@ void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16
     }
     
     if (w&1) {
-      ptr = (uint8*)0x600000+y*4096+x+w-1;
+      ptr = (uint8*)b->memory+y*4096+x+w-1;
       for (i=0;i<h;i++) {
         *ptr=color8;
         ptr+=4096;
@@ -333,25 +373,26 @@ void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16
     w--;
     w*=2;
     h--;
-    *((uint16*)0x8f0034) = color>>16; // 32 bit color reg
-    *((uint16*)0x8f0036) = color;
+    *((uint16*)(registers+0x34)) = color>>16; // 32 bit color reg
+    *((uint16*)(registers+0x36)) = color;
   } else {
     w--;
     h--;
-    *((uint16*)0x8f0028) = color;
+    *((uint16*)(registers+0x28)) = color;
   }
 
-  *((uint16*)0x8f0020) = x;
-  *((uint16*)0x8f0022) = y;
-  *((uint16*)0x8f0024) = x+w;
-  *((uint16*)0x8f0026) = y+h;
+  *((uint16*)(registers+0x20)) = x;
+  *((uint16*)(registers+0x22)) = y;
+  *((uint16*)(registers+0x24)) = x+w;
+  *((uint16*)(registers+0x26)) = y+h;
   
-  *((uint16*)0x8f002a) = 0x1; // enable blitter
+  *((uint16*)(registers+0x2a)) = 0x1; // enable blitter*/
 }
 
 void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
   uint16 blitter_busy = 0;
   //debug("");
+  uint8* registers = (uint8*)b->registers;
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
     dx/=2;
@@ -369,52 +410,54 @@ void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1")
   }
 
   if (dy<y) {
-    *((uint16*)0x8f0022) = dy;
-    *((uint16*)0x8f0026) = dy+h;
-    *((uint16*)0x8f002e) = y;
-    *((uint16*)0x8f0032) = y+h;
+    *((uint16*)(registers+0x22)) = dy;
+    *((uint16*)(registers+0x26)) = dy+h;
+    *((uint16*)(registers+0x2e)) = y;
+    *((uint16*)(registers+0x32)) = y+h;
   } else {
-    *((uint16*)0x8f0022) = dy+h;
-    *((uint16*)0x8f0026) = dy;
-    *((uint16*)0x8f002e) = y+h;
-    *((uint16*)0x8f0032) = y;
+    *((uint16*)(registers+0x22)) = dy+h;
+    *((uint16*)(registers+0x26)) = dy;
+    *((uint16*)(registers+0x2e)) = y+h;
+    *((uint16*)(registers+0x32)) = y;
   }
 
   if (dx<x) {
-    *((uint16*)0x8f0020) = dx; // write start point
-    *((uint16*)0x8f0024) = dx+w; // write end point
-    *((uint16*)0x8f002c) = x; // read start point
-    *((uint16*)0x8f0030) = x+w; // read end point
+    *((uint16*)(registers+0x20)) = dx; // write start point
+    *((uint16*)(registers+0x24)) = dx+w; // write end point
+    *((uint16*)(registers+0x2c)) = x; // read start point
+    *((uint16*)(registers+0x30)) = x+w; // read end point
   } else {
-    *((uint16*)0x8f0020) = dx+w; // write start point
-    *((uint16*)0x8f0024) = dx; // write end point
-    *((uint16*)0x8f002c) = x+w; // read start point
-    *((uint16*)0x8f0030) = x; // read end point
+    *((uint16*)(registers+0x20)) = dx+w; // write start point
+    *((uint16*)(registers+0x24)) = dx; // write end point
+    *((uint16*)(registers+0x2c)) = x+w; // read start point
+    *((uint16*)(registers+0x30)) = x; // read end point
   }
   
-  *((uint16*)0x8f002a) = 0x2; // enable blitter
-  
-  /*do {
-    blitter_busy = *((volatile uint16*)0x8f002a);
-  } while(blitter_busy!=0);*/
+  *((uint16*)(registers+0x2a)) = 0x2; // enable blitter
 }
 
 void blitter_wait(register struct RTGBoard* b asm("a0")) {
   uint16 blitter_busy = 0;
   //debug("");
+  uint8* registers = (uint8*)b->registers;
   do {
-    blitter_busy = *((volatile uint16*)0x8f002a);
+    blitter_busy = *((volatile uint16*)(registers+0x2a));
   } while(blitter_busy!=0);
 }
 
 void sprite_setup(register struct RTGBoard* b asm("a0"), register uint32 enable asm("d0")) {
+  //debug("");
 }
 
 void sprite_xy(register struct RTGBoard* b asm("a0")) {
-  *((volatile uint16*)0x8f0040) = b->cursor_x;
-  *((volatile uint16*)0x8f0042) = b->cursor_y;
-  *((volatile uint16*)0x8f0044) = b->cursor_x+(b->cursor_w)-1;
-  *((volatile uint16*)0x8f0046) = b->cursor_y+(b->cursor_h)-1;
+  uint8* registers = (uint8*)b->registers;
+  uint16 x = b->cursor_x<<(b->scratch[0]);
+  uint16 y = b->cursor_y<<(b->scratch[0]);
+  
+  *((volatile uint16*)(registers+0x40)) = x;
+  *((volatile uint16*)(registers+0x42)) = y;
+  *((volatile uint16*)(registers+0x44)) = x+(b->cursor_w)-1;
+  *((volatile uint16*)(registers+0x46)) = y+(b->cursor_h)-1;
 }
 
 void sprite_bitmap(register struct RTGBoard* b asm("a0")) {
@@ -430,8 +473,8 @@ void sprite_bitmap(register struct RTGBoard* b asm("a0")) {
 
   if (0) {
     s32=(uint32*)b->cursor_sprite_bitmap;
-    d32=(volatile uint32*)0x8f0800;
-    d32b=(volatile uint32*)0x8f0880; // bitplane 2
+    d32=(volatile uint32*)b->registers+0x800;
+    d32b=(volatile uint32*)b->registers+0x880; // bitplane 2
 
     for (y=0; y<32; y++) {
       *d32++ =*s32++;
@@ -439,8 +482,8 @@ void sprite_bitmap(register struct RTGBoard* b asm("a0")) {
     }
   } else {
     s16=(uint16*)(b->cursor_sprite_bitmap+4);
-    d16=(volatile uint16*)0x8f0800;
-    d16b=(volatile uint16*)0x8f0880; // bitplane 2
+    d16=(volatile uint16*)(((uint8*)b->registers)+0x800);
+    d16b=(volatile uint16*)(((uint8*)b->registers)+0x880); // bitplane 2
 
     for (y=0; y<32; y++) {
       *d16++=*s16++;
@@ -452,13 +495,15 @@ void sprite_bitmap(register struct RTGBoard* b asm("a0")) {
 void sprite_colors(register struct RTGBoard* b asm("a0"), register uint8 idx asm("d0"),
   register uint8 red asm("d1"), register uint8 green asm("d2"), register uint8 blue asm("d3")) {
 
+  uint8* registers = (uint8*)b->registers;
   //debug("%x %x %x %x",idx,red,green,blue);
-  if (idx==2) idx=1;
-  else if (idx==1) idx=2;
+
+  if (idx==0) idx=1;
+  else if (idx==1) idx=0;
   
-  *((volatile uint16*)(0x8f0922+2*idx))=red;
-  *((volatile uint16*)(0x8f0912+2*idx))=green;
-  *((volatile uint16*)(0x8f0902+2*idx))=blue;
+  *((volatile uint16*)(registers+0x922+2*idx))=blue;
+  *((volatile uint16*)(registers+0x912+2*idx))=green;
+  *((volatile uint16*)(registers+0x902+2*idx))=red;
 }
 
 ADDTABL_END();
