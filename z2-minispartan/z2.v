@@ -180,8 +180,9 @@ reg  [21:0] fetch_y = 0;
 reg  fetching = 0;
 
 reg display_enable = 1;
-reg [15:0] glitchx_reg = 'h580; // 8f0012 magic value
-//reg [15:0] glitchx2_reg = 'h1fd; // 8f0010
+reg [15:0] copy_glitch_reg1 = 'h0;
+reg [15:0] copy_glitch_reg2 = 'h580; // 8f0012 magic value
+
 parameter glitchx2_reg = 'h1fd;
 //reg  [8:0] 
 parameter ram_burst_col = 'h1fe; //'b111111010; 8f0014
@@ -555,10 +556,6 @@ always @(posedge z_sample_clk) begin
       vs_sync_count <= vs_sync_count + 1'b1;
     else
       vs_sync_count <= 0;
-    
-  end else if (capture_prey < 'h50) begin
-    // skip top porch
-    capture_prey <= capture_prey+1'b1;
   end else begin
     if (vs_sync_count > 10) begin
       vs_sync_count <= 0;
@@ -569,11 +566,16 @@ always @(posedge z_sample_clk) begin
       vs_sync_count <= 0;
     
     if (hs_sync[6:4]==3'b111 && hs_sync[3:1]==3'b000) begin
-      capture_prex <= 0;
-      capture_x <= 0;
-      capture_subx <= 0;
-      capture_y <= capture_y + 1'b1;
-      capture_ptr <= capture_ptr + row_pitch;
+      if (capture_prey != 32) begin
+        // skip top porch
+        capture_prey <= capture_prey+1'b1;
+      end else begin
+        capture_prex <= 0;
+        capture_x <= 0;
+        capture_subx <= 0;
+        capture_y <= capture_y + 1'b1;
+        capture_ptr <= capture_ptr + row_pitch;
+      end
     end else if (capture_subx < capture_freq) begin
       // scale pixels
       capture_subx <= capture_subx+1'b1;
@@ -612,6 +614,7 @@ parameter RAM_READING_ZORRO = 5;
 parameter RAM_WRITING_ZORRO = 6;
 parameter RAM_BURST_OFF = 7;
 parameter RAM_BURST_ON = 8;
+parameter RAM_READING_BLIT = 9;
 
 /*reg [5:0] uart_nybble = 0;
 
@@ -637,6 +640,11 @@ end*/
 reg need_row_fetch = 0;
 
 reg [3:0] dtack_time = 0;
+
+reg blitter_dirx = 0;
+reg blitter_diry = 0;
+
+reg [2:0] linescalecount = 0;
 
 // =================================================================================
 // ZORRO MACHINE
@@ -833,8 +841,8 @@ always @(posedge z_sample_clk) begin
       capture_mode <= 1;
       scalemode <= 1;
       colormode <= 1;
-      screen_w <= 'h490;
-      screen_h <= 'h200;
+      screen_w <= 'h500;
+      screen_h <= 'h210;
       capture_porch <= 'hb0;
       sprite_ay <= 0;
       sprite_ay2 <= 0;
@@ -1139,7 +1147,8 @@ always @(posedge z_sample_clk) begin
         'h0a: dataout_time <= regdata_in[7:0];
         'h0c: margin_x <= regdata_in[9:0];
         //'h10: glitchx2_reg <= regdata_in[15:0];
-        'h12: glitchx_reg <= regdata_in[15:0];
+        'h12: copy_glitch_reg1 <= regdata_in[15:0];
+        'h14: copy_glitch_reg2 <= regdata_in[15:0];
         //'h14: ram_burst_col <= regdata_in[8:0];
         
         // blitter regs
@@ -1150,11 +1159,16 @@ always @(posedge z_sample_clk) begin
         'h28: blitter_rgb <= regdata_in[15:0];
         'h2a: begin
           blitter_enable <= regdata_in[3:0];
+          
           blitter_curx <= blitter_x1;
           blitter_cury <= blitter_y1;
           blitter_curx2 <= blitter_x3;
           blitter_cury2 <= blitter_y3;
-          blitter_ptr <= blitter_y1 * row_pitch;
+          
+          blitter_dirx <= (blitter_x3>blitter_x4)?1'b1:1'b0;
+          blitter_diry <= (blitter_y3>blitter_y4)?1'b1:1'b0;
+          
+          blitter_ptr <= blitter_y1 << 11; // * row_pitch?
           blitter_rgb32_t <= 1;
         end
         'h2c: blitter_x3 <= regdata_in[10:0];
@@ -1253,12 +1267,12 @@ always @(posedge z_sample_clk) begin
         fetch_x <= 0;
         if (counter_y == 0) begin
           fetch_y <= 0;
-        end else if (scalemode==0) begin
+          linescalecount <= 0;
+        end else if (linescalecount < scalemode) begin
+          linescalecount <= linescalecount + 1;
+        end else begin
           fetch_y <= fetch_y + row_pitch;
-        end else if (scalemode==1 && counter_y[0]==1'b0) begin
-          fetch_y <= fetch_y + row_pitch;
-        end else if (scalemode==2 && counter_y[1:0]==2'b0) begin
-          fetch_y <= fetch_y + row_pitch;
+          linescalecount <= 0;
         end
         
         ram_arbiter_state <= RAM_READY;
@@ -1290,40 +1304,38 @@ always @(posedge z_sample_clk) begin
         end
       end else if (blitter_enable==2 && cmd_ready) begin
         // block copy (read)
-        if (blitter_curx2!=blitter_x4) begin
+        if (blitter_curx2 != blitter_x4) begin
           blitter_enable <= 3; // wait for read
-        end else if (blitter_cury2<blitter_y4) begin
+        end else if (blitter_cury2 == blitter_y4) begin
+          blitter_enable <= 0; // done
+        end else if (blitter_diry == 0) begin
           blitter_curx <= blitter_x1;
           blitter_curx2 <= blitter_x3;
           blitter_cury <= blitter_cury + 1'b1;
           blitter_cury2 <= blitter_cury2 + 1'b1;
           blitter_enable <= 3; // wait for read
-        end else if (blitter_cury2>blitter_y4) begin
+        end else begin
           blitter_curx <= blitter_x1;
           blitter_curx2 <= blitter_x3;
           blitter_cury <= blitter_cury - 1'b1;
           blitter_cury2 <= blitter_cury2 - 1'b1;
           blitter_enable <= 3; // wait for read
-        end else begin
-          blitter_enable <= 0;
-          //ram_enable <= 0;
         end
-      end else if (blitter_enable==3) begin        //  && counter_x<glitchx_reg
-        ram_byte_enable <= 'b11;
-        ram_addr    <= (blitter_cury2<<11)|blitter_curx2; // FIXME
-        ram_write   <= 0;
-        ram_enable  <= 1;
+      end else if (blitter_enable==3 && counter_x<1300) begin
+        if (cmd_ready && data_out_queue_empty) begin
+          ram_byte_enable <= 'b11;
+          ram_addr    <= (blitter_cury2<<11)|blitter_curx2; // FIXME
+          ram_write   <= 0;
+          ram_enable  <= 1;
+          ram_arbiter_state <= RAM_READING_BLIT;
+        end else 
+          ram_enable <= 0;
         
-        // block copy (data ready)
-        if (data_out_ready) begin
-          blitter_copy_rgb <= ram_data_out;
-          blitter_enable <= 4;
-        end
-      end else if (blitter_enable==4) begin
-        if (blitter_curx2>blitter_x4) begin // TODO sth about "eliminate carry chain branches"
+      end else if (blitter_enable==4 && cmd_ready) begin
+        if (blitter_dirx==1) begin
           blitter_curx2 <= blitter_curx2 - 1'b1;
           blitter_curx  <= blitter_curx - 1'b1;
-        end else if (blitter_curx2<blitter_x4) begin
+        end else begin
           blitter_curx2 <= blitter_curx2 + 1'b1;
           blitter_curx  <= blitter_curx + 1'b1;
         end
@@ -1334,8 +1346,9 @@ always @(posedge z_sample_clk) begin
         ram_write   <= 1;
         ram_enable  <= 1;
         ram_byte_enable <= 'b11;
-      end else if (blitter_enable==5 && cmd_ready) begin
+      end else if (blitter_enable==5) begin
         blitter_enable <= 2;
+        ram_enable <= 0;
         
       // ZORRO READ/WRITE ----------------------------------------------
       end else if (blitter_enable==0 && zorro_ram_read_request && counter_x<1300) begin
@@ -1374,6 +1387,16 @@ always @(posedge z_sample_clk) begin
         ram_write   <= 1;
         ram_enable  <= 1;
       end
+      
+    RAM_READING_BLIT: begin
+      // block copy (data ready)
+      if (data_out_ready) begin
+        ram_enable <= 0;
+        blitter_copy_rgb <= ram_data_out;
+        blitter_enable <= 4;
+        ram_arbiter_state <= RAM_ROW_FETCHED;
+      end
+    end
       
     RAM_READING_ZORRO: begin
       if (data_out_ready) begin
@@ -1476,7 +1499,7 @@ always @(posedge vga_clk) begin
     end
   end*/
   
-  if (dvi_blank || (counter_8x>=(screen_w)) || (counter_y>=screen_h)) begin
+  if (dvi_blank || (counter_x>=(screen_w+margin_x)) || (counter_y>=screen_h)) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;

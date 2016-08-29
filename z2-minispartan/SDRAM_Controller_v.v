@@ -35,7 +35,7 @@ module SDRAM_Controller_v (
    // command and write port
    cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in,
    // Read data port
-   data_out, data_out_ready, data_out_queue_empty, sdram_state, sdram_btb, burst,
+   data_out, data_out_ready, data_out_queue_empty, burst,
    burst_col,
    // SDRAM signals
    SDRAM_CLK,  SDRAM_CKE,  SDRAM_CS,   SDRAM_RAS,  SDRAM_CAS,
@@ -57,8 +57,6 @@ module SDRAM_Controller_v (
    input  [15:0] cmd_data_in;
    input  [8:0] burst_col;
    input  burst;
-   output [4:0] sdram_state;
-   output sdram_btb;
    
    reg [3:0]  iob_command  = CMD_NOP;
    reg [12:0] iob_address  = 13'b0000000000000;
@@ -139,7 +137,6 @@ module SDRAM_Controller_v (
    parameter s_open_in_7 = 5'b10111;
    parameter s_open_in_8 = 5'b11000;
    reg [4:0] state = s_startup;
-   assign sdram_state = state;
    
    // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
    parameter startup_refresh_max   = 14'b11111111111111;
@@ -158,7 +155,7 @@ module SDRAM_Controller_v (
    reg save_wr                  = 1'b0; 
    reg [sdram_row_bits-1:0] save_row          = 13'b0000000000000;
    reg [1:0]  save_bank         = 2'b00;
-   reg [sdram_column_bits-1:0] save_col          = 13'b0000000000000;
+   reg [sdram_row_bits-1:0] save_col          = 13'b0000000000000;
    reg [15:0] save_data_in      = 16'b0000000000000000;
    reg [1:0]  save_byte_enable  = 2'b00;
    
@@ -232,13 +229,11 @@ module SDRAM_Controller_v (
 reg can_back_to_back = 0;
 reg burst_old = 0;
 
-assign sdram_btb = can_back_to_back;
-
 always @(posedge clk) captured_data <= sdram_din;
 
 always @(posedge clk)
    begin
-      startup_refresh_count <= startup_refresh_count+1;
+      startup_refresh_count <= startup_refresh_count+1'b1;
       
       //-- It we are ready for a new transaction and one is being presented
       //-- then accept it. Also remember what we are reading or writing,

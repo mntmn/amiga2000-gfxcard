@@ -82,8 +82,9 @@ int InitCard(struct RTGBoard* b) {
   b->type = 14;
   b->chip_type = 3;
   b->controller_type = 3;
-  
-  b->flags = 1|(1<<16)|(1<<20)|(1<<12); // 0 = has sprite, 16 = 32x32 sprite, 20 = display switch, 12 = flickerfix
+
+  // 1|(1<<16)|
+  b->flags = (1<<20)|(1<<12); // 0 = has sprite, 16 = 32x32 sprite, 20 = display switch, 12 = flickerfix
   
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
   b->sprite_flags = 0; //b->color_formats;
@@ -157,13 +158,15 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_clear_mask = set_clear_mask;
   b->fn_set_read_plane = set_read_plane;
 
-  b->fn_sprite_setup = sprite_setup;
+  /*b->fn_sprite_setup = sprite_setup;
   b->fn_sprite_xy = sprite_xy;
   b->fn_sprite_bitmap = sprite_bitmap;
-  b->fn_sprite_colors = sprite_colors;
+  b->fn_sprite_colors = sprite_colors;*/
 
   // save scalemode locally
   b->scratch[0] = 0;
+  b->scratch[6] = 1280;
+  b->scratch[8] = 720;
   
   return 1;
 }
@@ -231,6 +234,9 @@ void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint
 
 void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1"), int16 border asm("d0")) {
   uint8* registers = (uint8*)b->registers;
+  uint16 scale = 0;
+  uint16 w;
+  uint16 h;
   
   //debug("F %lx",b->color_format);
   b->mode_info = m;
@@ -244,23 +250,26 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x48)) = 1;
   }
 
-  *((uint16*)(registers+6)) = m->width;
-  *((uint16*)(registers+8)) = m->height;
-
   if (m->height>360 || m->width>640) {
-    *((uint16*)(registers+4)) = 0;
-    b->scratch[0] = 0;
+    scale = 0;
+    w = m->width;
+    h = m->height;
   } else if (m->height>240 || m->width>320) {
-    b->scratch[0] = 1;
-    *((uint16*)(registers+4)) = 1;
-    *((uint16*)(registers+6)) = 2*m->width;
-    *((uint16*)(registers+8)) = 2*m->height;
+    scale = 1;
+    w = m->width+m->width;
+    h = m->height+m->height;
   } else {
-    b->scratch[0] = 2;
-    *((uint16*)(registers+4)) = 2;
-    *((uint16*)(registers+6)) = 4*m->width;
-    *((uint16*)(registers+8)) = 4*m->height;
+    scale = 2;
+    w = m->width+m->width+m->width;
+    h = m->height+m->height+m->height;
   }
+  
+  b->scratch[0] = scale;
+  b->scratch[6] = w;
+  b->scratch[8] = h;
+  *((uint16*)(registers+4)) = scale;
+  *((uint16*)(registers+6)) = w;
+  *((uint16*)(registers+8)) = h;
 }
 
 uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format asm("d7")) {
@@ -306,13 +315,16 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     
     // capture amiga video to 16bit
     *((uint16*)(registers+0x48)) = 1; // colormode
-    *((uint16*)(registers+4)) = 1; // scalemode
+    *((uint16*)(registers+0x04)) = 1; // scalemode
     *((uint16*)(registers+0x46)) = 0; // sprite off
-    *((uint16*)(registers+0x50)) = 0xffff;
+    *((uint16*)(registers+0x50)) = 1; // capture on
+
+    *((uint16*)(registers+0x06)) = 0x490; // screenw
+    *((uint16*)(registers+0x08)) = 0x200; // screenh
+    
   } else {
     // rtg mode
     *((uint16*)(registers+0x50)) = 0;
-    *((uint16*)(registers+4)) = b->scratch[0]; // scalemode
     
     if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
       *((uint16*)(registers+0x48)) = 0;
@@ -321,6 +333,10 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     } else {
       *((uint16*)(registers+0x48)) = 1;
     }
+    
+    *((uint16*)(registers+4)) = b->scratch[0]; // restore scalemode
+    *((uint16*)(registers+6)) = b->scratch[6]; // restore screenw
+    *((uint16*)(registers+8)) = b->scratch[8]; // restore screenh
   }
   
   return 1-state;
