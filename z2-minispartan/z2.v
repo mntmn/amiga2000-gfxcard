@@ -176,7 +176,8 @@ reg  [15:0] fetch_buffer [0:1299];
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_x2 = 0;
 
-reg  [21:0] fetch_y = 0;
+reg  [23:0] fetch_y = 0;
+reg  [23:0] pan_ptr = 0;
 reg  fetching = 0;
 
 reg display_enable = 1;
@@ -271,7 +272,7 @@ parameter v_sync_start = v_rez+3;
 parameter v_sync_end   = v_rez+3+5;
 parameter v_max        = 749;
 
-parameter ZORRO3 = 1;
+reg ZORRO3 = 1;
 
 reg [11:0] screen_w = 1280;
 reg [11:0] screen_h = 720;
@@ -281,6 +282,7 @@ reg [11:0] screen_h = 720;
 reg [23:0] zaddr;
 reg [23:0] zaddr_sync;
 reg [23:0] zaddr_sync2;
+reg [23:0] z2_mapped_addr;
 reg [15:0] data;
 reg [15:0] data_z3_low16;
 reg [15:0] data_in;
@@ -297,7 +299,7 @@ reg [15:0] z3_read_data;
 reg burst_enabled = 1;
 
 reg dataout = 0;
-reg dataout_z3 = 1;
+reg dataout_z3 = 0;
 reg dataout_enable = 0;
 reg slaven = 0;
 reg dtack = 0;
@@ -308,12 +310,11 @@ assign zDIR3     = dataout_z3; // a16-a23 <- input
 assign zDIR4     = dataout_z3; // a8-a15 <- input
 
 reg z_ready = 'b1;
-assign zXRDY = z_ready?1'bZ:1'b0; //works only if bZ?
-assign znCINH = 1; //1'bZ; //0; // Z2 = /OVR this changes boot behaviour somehow
+assign zXRDY  = z_ready?1'bZ:1'b0; //works only if bZ?
+assign znCINH = 1; //1'bZ; //0; // Z2 = /OVR
 
 assign znSLAVEN = (dataout && slaven)?1'b0:1'b1;
-//assign znDTACK  = dataout; //?1'b0:1'bZ;
-assign znDTACK = dtack?1'b0:1'bZ;
+assign znDTACK  = dtack?1'b0:1'bZ;
 
 assign zD  = (dataout | dataout_z3) ? data : 16'bzzzz_zzzz_zzzz_zzzz; // data = Z2: full 16 bit or Z3: upper 16 bit
 assign zA  = (dataout_z3) ? {data_z3_low16, 7'bzzzz_zzz} : 23'bzzz_zzzz_zzzz_zzzz_zzzz_zzzz;
@@ -339,17 +340,6 @@ reg [23:0] last_addr = 0;
 reg [23:0] last_read_addr = 0;
 reg [15:0] last_data = 0;
 reg [15:0] last_read_data = 0;
-
-// write queue
-
-parameter max_fill = 255;
-parameter q_msb = 21; // -> 20 bit wide RAM addresses (16-bit words) = 2MB
-parameter lds_bit = q_msb+1;
-parameter uds_bit = q_msb+2;
-/*reg [(q_msb+2):0] writeq_addr [0:max_fill]; // 21=uds 20=lds
-reg [15:0] writeq_data [0:max_fill-1];
-reg [12:0] writeq_fill = 0;
-reg [12:0] writeq_drain = 0;*/
 
 reg [7:0] palette_r [0:255];
 reg [7:0] palette_g [0:255];
@@ -377,8 +367,8 @@ reg [1:0] counter_scale = 0;
 
 // memory map
 
-parameter rom_low  = 24'he80000; // actually this is autoconf
-parameter rom_high = 24'he80080;
+parameter autoconf_low  = 24'he80000;
+parameter autoconf_high = 24'he80080;
 reg [31:0] ram_low  = 32'h48000000;
 parameter ram_size = 32'h2f0000;
 parameter reg_base = 32'h2f0000;
@@ -432,15 +422,14 @@ reg [7:0] vs_sync_count = 0;
 reg [2:0] cap_state = 0;
 
 // main FSM
-
 parameter RESET = 0;
-parameter CONFIGURING = 1;
-parameter IDLE = 2;
+parameter Z2_CONFIGURING = 1;
+parameter Z2_IDLE = 2;
 parameter WAIT_READ = 3;
 parameter WAIT_WRITE = 4;
-parameter WAIT_READ_ROM = 5;
 parameter WAIT_WRITE2 = 6;
 parameter WAIT_READ2 = 7;
+
 parameter CONFIGURED = 8;
 parameter PAUSE = 9;
 
@@ -452,26 +441,22 @@ parameter Z3_READ_LOWER = 14;
 parameter Z3_READ_DELAY = 15;
 parameter Z3_ENDCYCLE = 16;
 parameter Z3_DTACK = 17;
-parameter CONFIGURING_Z3 = 18;
+parameter Z3_CONFIGURING = 18;
 
+parameter WAIT_REGWRITE = 19;
 parameter REGWRITE = 20;
-parameter Z3_REGWRITE = 21;
+parameter REGREAD = 21;
 
-reg [6:0] zorro_state = CONFIGURING_Z3;
-//wire [23:0] zaddr_regpart;
-//wire [23:0] zaddr_byte;
+reg [6:0] zorro_state = RESET;
 
-// TODO convert to regs
-/*assign datastrobe_synced = ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)));
-assign zaddr_in_ram = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=ram_low && zaddr_sync2<ram_high);
-assign zaddr_in_reg = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=reg_low && zaddr_sync2<reg_high);
-assign zaddr_autoconfig = (znAS_sync[1]==0 && znAS_sync[0]==0 && zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=rom_low && zaddr_sync2<rom_high);
-*/
+reg datastrobe_synced = 0;
+reg zaddr_in_ram = 0;
+reg zaddr_in_reg = 0;
+reg zaddr_autoconfig = 0;
 
 reg zorro_read = 0;
 reg zorro_write = 0;
 
-//wire [15:0] zaddr_regpart =  //&24'hffff;
 reg [15:0] zaddr_regpart;
 wire [10:0] zaddr_byte = zaddr_regpart[11:1];
 wire [7:0] zaddr_7f = zaddr_regpart[6:0]; 
@@ -498,10 +483,10 @@ always @(posedge z_sample_clk) begin
   znRST_sync  <= {znRST_sync[0],znRST};
   
   data_in <= zD;
-  data_in_z3_low16 <= zA[22:7];
+  data_in_z3_low16 <= zA[22:7]; // FIXME why sample this twice?
   zdata_in_sync <= data_in;
   
-  zorro_read <= (zREAD_sync[1] & zREAD_sync[0]);
+  zorro_read  <= (zREAD_sync[1] & zREAD_sync[0]);
   zorro_write <= (!zREAD_sync[1] & !zREAD_sync[0]);
   
   if (znUDS_sync[1]==0 || znLDS_sync[1]==0 || znDS1_sync[1]==0 || znDS0_sync[1]==0) begin
@@ -509,10 +494,14 @@ always @(posedge z_sample_clk) begin
     z3_din_low_s2  <= zA[22:7];
   end
   
-  zaddr[0] <= 0;
-  zaddr[23:1] <= zA[22:0];
+  //if (znAS_sync[1]==1 && znAS_sync[0]==0) begin
+  zaddr <= {zA[22:0],1'b0};
+  //end
+  
   zaddr_sync  <= zaddr;
   zaddr_sync2 <= zaddr_sync;
+  
+  z2_mapped_addr <= ((zaddr_sync-ram_low)>>1);
   
   znFCS_sync <= {znFCS_sync[1:0],znFCS};
   
@@ -521,6 +510,18 @@ always @(posedge z_sample_clk) begin
     z3addr <= {zD[15:8],zA[22:1],2'b00};
   end
   z3_mapped_addr <= ((z3addr)&'h00ffffff)>>1;
+  
+  datastrobe_synced <= ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) 
+                        && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)))?1'b1:1'b0;
+  
+  zaddr_in_ram <= (zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=ram_low && zaddr_sync2<ram_high)?1'b1:1'b0;
+  zaddr_in_reg <= (zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=reg_low && zaddr_sync2<reg_high)?1'b1:1'b0;
+  
+  // zaddr_sync==zaddr && zaddr_sync==zaddr_sync2 && zaddr_sync2>=autoconf_low && zaddr_sync2<autoconf_high &&
+  if (znAS_sync[0]==0 && zaddr>=autoconf_low && zaddr<autoconf_high)
+    zaddr_autoconfig <= 1'b1;
+  else
+    zaddr_autoconfig <= 1'b0;
 end
 
 always @(posedge z_sample_clk) begin
@@ -589,7 +590,6 @@ always @(posedge z_sample_clk) begin
       capture_subx <= 0;
     end
   end
-  
 end
 
 // ram arbiter
@@ -651,13 +651,13 @@ reg [2:0] linescalecount = 0;
 always @(posedge z_sample_clk) begin
   case (zorro_state)
     RESET: begin
+      scalemode <= 0;
+      colormode <= 3;
       dataout_enable <= 0;
       dataout <= 0;
       slaven <= 0;
       z_ready <= 1; // clear XRDY (cpu wait)
-      //zorro_ram_write_done <= 1;
       zorro_ram_read_done <= 1;
-      blitter_rgb <= 'h0005;
       blitter_enable <= 0;
       
       ram_low   <= 'h600000;
@@ -665,10 +665,16 @@ always @(posedge z_sample_clk) begin
       reg_low   <= 'h600000 + reg_base;
       reg_high  <= 'h600000 + reg_base + reg_size;
       
-      zorro_state <= CONFIGURING_Z3;
+      // poor man's z3sense
+      if (zaddr_autoconfig) begin
+        zorro_state <= Z2_CONFIGURING;
+        ZORRO3 <= 0;
+      end else if (z3addr[31:16]=='hff00)
+        zorro_state <= Z3_CONFIGURING;
+      
     end
     
-    CONFIGURING_Z3: begin
+    Z3_CONFIGURING: begin
       colormode <= 3;
       if (!znCFGIN && z3addr[31:16]=='hff00 && znFCS_sync[2]==0) begin
         if (zorro_read) begin
@@ -758,7 +764,7 @@ always @(posedge z_sample_clk) begin
           reg_low   <= ram_low + reg_base;
           reg_high  <= ram_low + reg_base + reg_size;
         end else
-          zorro_state <= CONFIGURING_Z3;
+          zorro_state <= Z3_CONFIGURING;
       end else begin
         if (dtack_time < 2)
           dtack_time <= dtack_time + 1'b1;
@@ -767,7 +773,7 @@ always @(posedge z_sample_clk) begin
       end
     end
     
-    /*CONFIGURING: begin
+    Z2_CONFIGURING: begin
       colormode <= 3;
       if (zaddr_autoconfig && !znCFGIN) begin
         if (zorro_read) begin
@@ -776,52 +782,51 @@ always @(posedge z_sample_clk) begin
           dataout <= 1;
           slaven <= 1;
           
-          case (zaddr & 'h0000ff)
-            'h000000: data <= 'b1100_0000_0000_0000; // zorro 2
-            'h000002: data <= 'b0111_0000_0000_0000; // next board unrelated (0), 4mb
+          case (zaddr[7:0])
+            8'h00: data <= 'b1100_1111_1111_1111; // zorro 2
+            8'h02: data <= 'b0111_1111_1111_1111; // next board unrelated (0), 4mb
             
-            'h000004: data <= 'b1111_0000_0000_0000; // product number
-            'h000006: data <= 'b1110_0000_0000_0000; // (23)
+            8'h04: data <= 'b1111_1111_1111_1111; // product number
+            8'h06: data <= 'b1110_1111_1111_1111; // (23)
             
-            'h000008: data <= 'b1010_0000_0000_0000; // flags inverted 0011
-            'h00000a: data <= 'b1111_0000_0000_0000; // inverted zero
+            8'h08: data <= 'b0011_1111_1111_1111; // flags inverted 0011
+            8'h0a: data <= 'b1111_1111_1111_1111; // inverted zero
             
-            'h000010: data <= 'b1111_0000_0000_0000; // manufacturer high byte inverted (02)
-            'h000012: data <= 'b1101_0000_0000_0000; // 
-            'h000014: data <= 'b0110_0000_0000_0000; // manufacturer low byte (9a)
-            'h000016: data <= 'b0101_0000_0000_0000;
+            8'h10: data <= 'b1001_1111_1111_1111; // manufacturer high byte inverted (02)
+            8'h12: data <= 'b0010_1111_1111_1111; // 
+            8'h14: data <= 'b1001_1111_1111_1111; // manufacturer low byte (9a)
+            8'h16: data <= 'b0001_1111_1111_1111;
             
-            'h000018: data <= 'b1111_0000_0000_0000; // serial 01 01 01 01
-            'h00001a: data <= 'b1110_0000_0000_0000; //
-            'h00001c: data <= 'b1111_0000_0000_0000; //
-            'h00001e: data <= 'b1110_0000_0000_0000; //
-            'h000020: data <= 'b1111_0000_0000_0000; //
-            'h000022: data <= 'b1110_0000_0000_0000; //
-            'h000024: data <= 'b1111_0000_0000_0000; //
-            'h000026: data <= 'b1110_0000_0000_0000; //
+            8'h18: data <= 'b1111_1111_1111_1111; // serial 01 01 01 01
+            8'h1a: data <= 'b1110_1111_1111_1111; //
+            8'h1c: data <= 'b1111_1111_1111_1111; //
+            8'h1e: data <= 'b1110_1111_1111_1111; //
+            8'h20: data <= 'b1111_1111_1111_1111; //
+            8'h22: data <= 'b1110_1111_1111_1111; //
+            8'h24: data <= 'b1111_1111_1111_1111; //
+            8'h26: data <= 'b1110_1111_1111_1111; //
             
             //'h000040: data <= 'b0000_0000_0000_0000; // interrupts (not inverted)
             //'h000042: data <= 'b0000_0000_0000_0000; //
            
-            default: data <= 'b1111_0000_0000_0000;
+            default: data <= 'b1111_1111_1111_1111;
           endcase
         end else begin
           // write to autoconfig register
           if (datastrobe_synced) begin
-            case (zaddr & 'h0000ff)
-              'h000048: begin
-                //ram_low[23:20] <= data_in[15:12];
-              end
-              'h00004a: begin
-                //ram_low[19:16] <= data_in[15:12];
-                //ram_high  <= ram_low + ram_size;
-                //reg_low   <= ram_low + reg_base;
-                //reg_high  <= ram_low + reg_base + 'h800;
+            case (zaddr[7:0])
+              8'h48: begin
+                ram_low[31:24] <= 8'h0;
+                ram_low[23:20] <= zdata_in_sync[15:12];
                 zorro_state <= CONFIGURED; // configured
                 z_confdone <= 1;
                 colormode <= 1;
               end
-              'h00004c: begin 
+              8'h4a: begin
+                ram_low[31:24] <= 8'h0;
+                ram_low[19:16] <= zdata_in_sync[15:12];
+              end
+              8'h4c: begin 
                 zorro_state <= CONFIGURED; // configured, shut up
                 z_confdone <= 1;
                 colormode <= 1;
@@ -835,42 +840,48 @@ always @(posedge z_sample_clk) begin
         dataout_enable <= 0;
         slaven <= 0;
       end
-    end*/
+    end
     
     CONFIGURED: begin
-      capture_mode <= 1;
-      scalemode <= 1;
+      capture_mode <= 0;
+      scalemode <= 0;
       colormode <= 1;
-      screen_w <= 'h500;
-      screen_h <= 'h210;
+      //screen_w <= 'h500;
+      //screen_h <= 'h210;
       capture_porch <= 'hb0;
       sprite_ay <= 0;
       sprite_ay2 <= 0;
-      zorro_state <= Z3_IDLE;
+      burst_enabled <= 1;
+      margin_x <= 7;
+      row_pitch <= 2048;
       
       blitter_enable <= 1;
       blitter_rgb <= 'h1111;
+
+      ram_high  <= ram_low + ram_size - 4;
+      reg_low   <= ram_low + reg_base;
+      reg_high  <= ram_low + reg_base + 'h800;
+      
+      if (ZORRO3)
+        zorro_state <= Z3_IDLE;
+      else
+        zorro_state <= Z2_IDLE;
     end
     
     PAUSE: begin
     end
   
     // ----------------------------------------------------------------------------------  
-    /*IDLE: begin
-      dataout <= 0;
-      dataout_enable <= 0;
-      slaven <= 0;
-      write_stall <= 0;
-      z_ready <= 1; // clear XRDY (cpu wait)
-      
-      if (znRST_sync[1]==1 && znRST_sync[0]==0) begin
-        // system reset
-        zorro_state <= IDLE;
-      end else if (znAS_sync[1]==0 && znAS_sync[0]==0) begin
-        if (zorro_read && zaddr_in_ram) begin
+    Z2_IDLE: begin
+      if (znAS_sync[1]==0 && znAS_sync[0]==0) begin
+        if (zaddr_sync=='h000000 && znCFGIN) begin
+          // poor man's IO reset
+          z_confdone <= 0;
+          zorro_state <= Z2_CONFIGURING;
+        end else if (zorro_read && zaddr_in_ram) begin
           // read RAM
           // request ram access from arbiter
-          zorro_ram_read_addr <= ((zaddr_sync2-ram_low)>>1);
+          zorro_ram_read_addr <= z2_mapped_addr;
           zorro_ram_read_request <= 1;
           zorro_ram_read_done <= 0;
           data <= 'hffff;
@@ -884,14 +895,14 @@ always @(posedge z_sample_clk) begin
           zorro_state <= WAIT_READ2;
           
         end else if (zorro_write && zaddr_in_ram) begin
-          // write RAM
-          last_addr <= ((zaddr_sync2-ram_low)>>1);
+          // write RAM          
+          last_addr <= ((zaddr_sync2-ram_low)>>1); // z2_mapped_addr
           zorro_state <= WAIT_WRITE;
           
-        end else if (zorro_write && zaddr_in_reg && datastrobe_synced) begin
+        end else if (zorro_write && zaddr_in_reg) begin
           // write to register
-          zaddr_regpart <= zaddr_sync2[15:0];
-          zorro_state <= REGWRITE;
+          zaddr_regpart <= z2_mapped_addr[15:0];
+          zorro_state <= WAIT_REGWRITE;
           
         end else if (zorro_read && zaddr_in_reg) begin
           // read from registers
@@ -900,7 +911,7 @@ always @(posedge z_sample_clk) begin
           dataout <= 1;
           slaven <= 1;
           
-          case (zaddr_regpart)
+          case (zaddr_sync2[7:0])
             'h20: data <= blitter_x1;
             'h22: data <= blitter_y1;
             'h24: data <= blitter_x2;
@@ -923,15 +934,29 @@ always @(posedge z_sample_clk) begin
           endcase
          
         end        
+      end else begin
+        dataout <= 0;
+        dataout_enable <= 0;
+        slaven <= 0;
+        write_stall <= 0;
+        z_ready <= 1; // clear XRDY (cpu wait)
       end
-    end*/
-  /*
+    end
+    
+    WAIT_REGWRITE: begin
+      if (datastrobe_synced) begin
+        regdata_in <= zdata_in_sync;
+        zaddr_regpart <= zaddr_sync2[15:0];
+        zorro_state <= REGWRITE;
+      end
+    end
+    
     // ----------------------------------------------------------------------------------
     WAIT_READ2: begin
       if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
         // ram too slow TODO: report this
         zorro_ram_read_request <= 0;
-        zorro_state <= IDLE;
+        zorro_state <= Z2_IDLE;
         z_ready <= 1;
       end else if (zorro_ram_read_done) begin
         read_counter <= read_counter + 1;
@@ -947,7 +972,7 @@ always @(posedge z_sample_clk) begin
     // ----------------------------------------------------------------------------------
     WAIT_READ:
       if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        zorro_state <= IDLE;
+        zorro_state <= Z2_IDLE;
         z_ready <= 1;
       end else begin
         data <= zorro_ram_read_data;
@@ -957,10 +982,9 @@ always @(posedge z_sample_clk) begin
     // ----------------------------------------------------------------------------------
     WAIT_WRITE:
       if (!zorro_ram_write_request) begin
-        // there is still room in the queue
         z_ready <= 1;
         write_stall <= 0;
-        if (datastrobe_synced && zdata_in_sync==data_in) begin
+        if (datastrobe_synced/* && zdata_in_sync==data_in*/) begin
           zorro_ram_write_addr <= last_addr;
           zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]};
           zorro_ram_write_data <= zdata_in_sync;
@@ -977,22 +1001,22 @@ always @(posedge z_sample_clk) begin
     WAIT_WRITE2: begin
       z_ready <= 1;
       if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        zorro_state <= IDLE;
+        zorro_state <= Z2_IDLE;
       end
     end
-    */
+    
     // ----------------------------------------------------------------------------------
     // ----------------------------------------------------------------------------------
     Z3_IDLE: begin
       if (znCFGIN) begin
         z_confdone <= 0;
-        zorro_state <= CONFIGURING_Z3;
+        zorro_state <= Z3_CONFIGURING;
       end else if (znFCS_sync[2]==0) begin
         // falling edge of /FCS
         if (z3addr=='h00000000) begin
           // reset detection
           z_confdone <= 0;
-          zorro_state <= CONFIGURING_Z3;
+          zorro_state <= Z3_CONFIGURING;
         end else if ((z3addr >= ram_low) && (z3addr <= ram_high) && !zorro_read) begin
           slaven <= 1;
           if ((znUDS_sync[2]==0) || (znLDS_sync[2]==0) || (znDS1_sync[2]==0) || (znDS0_sync[2]==0)) begin
@@ -1017,12 +1041,19 @@ always @(posedge z_sample_clk) begin
         end else if (zorro_read && (z3addr >= reg_low) && (z3addr <= reg_high)) begin
           // read registers
           slaven <= 1;
-          dtack <= 1;
           dataout_enable <= 1;
           dataout_z3 <= 1;
           data <= 0;
-          data_z3_low16 <= blitter_enable;
-          zorro_state <= Z3_ENDCYCLE;
+          
+          if (znDS1_sync[2]==0) begin
+            regdata_in <= data_in_z3_low16;
+            zaddr_regpart <= (z3addr[15:0])|16'h2;
+            zorro_state <= REGREAD;
+          end else if (znUDS_sync[2]==0) begin
+            regdata_in <= zdata_in_sync;
+            zaddr_regpart <= z3addr[15:0];
+            zorro_state <= REGREAD;
+          end
         end else begin
           // address not recognized
           slaven <= 0;
@@ -1115,12 +1146,34 @@ always @(posedge z_sample_clk) begin
         dtack <= 1;
     end
     
+    REGREAD: begin
+      dtack <= 1;
+      zorro_state <= Z3_ENDCYCLE;
+      
+      case (zaddr_regpart)
+        'h2a: data_z3_low16 <= blitter_enable;
+        
+        'h60: data_z3_low16 <= sd_busy;
+        'h62: data_z3_low16 <= sd_read;
+        'h64: data_z3_low16 <= sd_write;
+        'h66: data_z3_low16 <= sd_handshake_out;
+        'h68: data_z3_low16 <= sd_addr_in[31:16];
+        'h6a: data_z3_low16 <= sd_addr_in[15:0];
+        'h6c: data_z3_low16 <= sd_data_in;
+        'h6e: data_z3_low16 <= sd_data_out;
+        'h70: data_z3_low16 <= sd_error;
+        'h72: data_z3_low16 <= sd_clkdiv;
+        
+        default: data_z3_low16 <= 'h0000;
+      endcase
+    end
+    
     REGWRITE: begin
-      //if (ZORRO3) begin
+      if (ZORRO3) begin
         dtack <= 1;
         zorro_state <= Z3_IDLE;
-      //end else
-      //  zorro_state <= IDLE;
+      end else
+        zorro_state <= Z2_IDLE;
       
       if (zaddr_regpart>='h920) begin
         sprite_palette_r[zaddr_nybble] <= regdata_in[7:0];
@@ -1146,10 +1199,9 @@ always @(posedge z_sample_clk) begin
         
         'h0a: dataout_time <= regdata_in[7:0];
         'h0c: margin_x <= regdata_in[9:0];
-        //'h10: glitchx2_reg <= regdata_in[15:0];
-        'h12: copy_glitch_reg1 <= regdata_in[15:0];
-        'h14: copy_glitch_reg2 <= regdata_in[15:0];
-        //'h14: ram_burst_col <= regdata_in[8:0];
+        'h10: preheat_x <= regdata_in[4:0];
+        //'h12: copy_glitch_reg1 <= regdata_in[15:0];
+        //'h14: copy_glitch_reg2 <= regdata_in[15:0];
         
         // blitter regs
         'h20: blitter_x1 <= regdata_in[10:0];
@@ -1168,7 +1220,7 @@ always @(posedge z_sample_clk) begin
           blitter_dirx <= (blitter_x3>blitter_x4)?1'b1:1'b0;
           blitter_diry <= (blitter_y3>blitter_y4)?1'b1:1'b0;
           
-          blitter_ptr <= blitter_y1 << 11; // * row_pitch?
+          blitter_ptr <= pan_ptr + (blitter_y1 << 11); // * row_pitch?
           blitter_rgb32_t <= 1;
         end
         'h2c: blitter_x3 <= regdata_in[10:0];
@@ -1177,6 +1229,9 @@ always @(posedge z_sample_clk) begin
         'h32: blitter_y4 <= regdata_in[10:0];
         'h34: blitter_rgb32[0] <= regdata_in[15:0];
         'h36: blitter_rgb32[1] <= regdata_in[15:0];
+        
+        'h38: pan_ptr[23:16] <= regdata_in[7:0];
+        'h3a: pan_ptr[15:0]  <= regdata_in;
         
         'h40: sprite_ax <= regdata_in[10:0];
         'h42: sprite_ay <= regdata_in[10:0];
@@ -1194,13 +1249,13 @@ always @(posedge z_sample_clk) begin
         'h5a: burst_enabled <= regdata_in[0];
         
         // sd card regs
-        /*'h60: sd_reset <= regdata_in[8];
+        'h60: sd_reset <= regdata_in[8];
         'h62: sd_read <= regdata_in[8];
         'h64: sd_write <= regdata_in[8];
         'h66: sd_handshake_in <= regdata_in[8];
         'h68: sd_addr_in[31:16] <= regdata_in;
         'h6a: sd_addr_in[15:0] <= regdata_in;
-        'h6c: sd_data_in <= regdata_in[15:8];*/
+        'h6c: sd_data_in <= regdata_in[15:8];
       endcase
     end
 
@@ -1244,7 +1299,7 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if (fetch_x >= screen_w) begin // + margin_x
+      if (fetch_x >= (screen_w + margin_x)) begin
         row_fetched <= 1; // row completely fetched
         ram_burst <= 0;
         ram_arbiter_state <= RAM_READY;
@@ -1266,10 +1321,10 @@ always @(posedge z_sample_clk) begin
         row_fetched <= 0;
         fetch_x <= 0;
         if (counter_y == 0) begin
-          fetch_y <= 0;
+          fetch_y <= pan_ptr; // TODO pan point
           linescalecount <= 0;
         end else if (linescalecount < scalemode) begin
-          linescalecount <= linescalecount + 1;
+          linescalecount <= linescalecount + 1'b1;
         end else begin
           fetch_y <= fetch_y + row_pitch;
           linescalecount <= 0;
@@ -1279,10 +1334,10 @@ always @(posedge z_sample_clk) begin
         
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
-        /*if (colormode==2) begin
+        if (colormode==2) begin
           blitter_rgb <= blitter_rgb32[blitter_rgb32_t];
           blitter_rgb32_t <= ~blitter_rgb32_t;
-        end*/
+        end
         
         // rect fill blitter
         if (blitter_curx <= blitter_x2) begin
@@ -1321,10 +1376,10 @@ always @(posedge z_sample_clk) begin
           blitter_cury2 <= blitter_cury2 - 1'b1;
           blitter_enable <= 3; // wait for read
         end
-      end else if (blitter_enable==3 && counter_x<1300) begin
+      end else if (blitter_enable==3/* && counter_x<1300*/) begin
         if (cmd_ready && data_out_queue_empty) begin
           ram_byte_enable <= 'b11;
-          ram_addr    <= (blitter_cury2<<11)|blitter_curx2; // FIXME
+          ram_addr    <= pan_ptr+(blitter_cury2<<11)+blitter_curx2; // FIXME
           ram_write   <= 0;
           ram_enable  <= 1;
           ram_arbiter_state <= RAM_READING_BLIT;
@@ -1341,7 +1396,7 @@ always @(posedge z_sample_clk) begin
         end
         
         blitter_enable <= 5;
-        ram_addr    <= (blitter_cury<<11)|blitter_curx;  
+        ram_addr    <= pan_ptr+(blitter_cury<<11)+blitter_curx; // FIXME
         ram_data_in <= blitter_copy_rgb;
         ram_write   <= 1;
         ram_enable  <= 1;
@@ -1351,7 +1406,7 @@ always @(posedge z_sample_clk) begin
         ram_enable <= 0;
         
       // ZORRO READ/WRITE ----------------------------------------------
-      end else if (blitter_enable==0 && zorro_ram_read_request && counter_x<1300) begin
+      end else if (blitter_enable==0 && zorro_ram_read_request/* && counter_x<1300*/) begin
         // process read request
         zorro_ram_read_done <= 0;
         if (cmd_ready && data_out_queue_empty) begin
@@ -1362,7 +1417,7 @@ always @(posedge z_sample_clk) begin
           ram_arbiter_state <= RAM_READING_ZORRO;
         end else 
           ram_enable <= 0;
-      end else if (blitter_enable==0 && zorro_ram_write_request && cmd_ready) begin
+      end else if (blitter_enable==0 && zorro_ram_write_request && cmd_ready/* && counter_x<1300*/) begin
         // process write request
         zorro_ram_write_done <= 1;
         zorro_ram_write_request <= 0;
@@ -1429,9 +1484,11 @@ reg[15:0] fetchb1;
 
 reg display_sprite = 0;
 
+reg [4:0] preheat_x = 0;
+reg preheat = 0;
+
 always @(posedge vga_clk) begin
-  if (counter_x >= h_max) begin
-    counter_x <= 0;
+  if (counter_x >= h_max-preheat_x && !preheat) begin
     if (capture_mode)
       counter_8x <= 'h210;
     else
@@ -1440,7 +1497,15 @@ always @(posedge vga_clk) begin
     counter_x_hi <= 0;
     counter_scale <= scalemode;
     display_x <= margin_x;
-    //display_x2 <= margin_x<<1;
+    display_x2 <= margin_x<<1'b1;
+    display_x3 <= (margin_x<<1'b1)+1'b1;
+    
+    preheat <= 1;
+  end
+
+  if (counter_x >= h_max) begin
+    counter_x <= 0;
+    preheat <= 0;
     
     if (counter_y == v_max) begin
       counter_y <= 0;
@@ -1452,8 +1517,6 @@ always @(posedge vga_clk) begin
   end else begin
     counter_x <= counter_x + 1'b1;
     display_x <= display_x + 1'b1;
-    
-    //display_x2 <= display_x2 + 2;
     
     if (counter_x>=h_max-64 && counter_y<screen_h)
       need_row_fetch <= 1;
@@ -1499,7 +1562,7 @@ always @(posedge vga_clk) begin
     end
   end*/
   
-  if (dvi_blank || (counter_x>=(screen_w+margin_x)) || (counter_y>=screen_h)) begin
+  if (!preheat && (dvi_blank || (counter_x>=(screen_w)) || (counter_y>=screen_h))) begin // (screen_w+margin_x)
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;
@@ -1515,22 +1578,26 @@ always @(posedge vga_clk) begin
         counter_x_hi <= 1'b0;
         counter_8x <= counter_8x + 1'b1;
         fetchb1 <= fetch_buffer[counter_8x];
-        pidx_r <= palette_r[pidx];
-        pidx_g <= palette_g[pidx];
-        pidx_b <= palette_b[pidx];
       end else begin
         pidx <= fetchb1[15:8];
         counter_x_hi <= 1'b1;
-        pidx_r <= palette_r[pidx];
-        pidx_g <= palette_g[pidx];
-        pidx_b <= palette_b[pidx];
       end
     end
     
+    if (preheat) begin
+      red_p <= 0;
+      green_p <= 0;
+      blue_p <= 0;
+    end else begin
+      red_p <= palette_r[pidx];
+      green_p <= palette_g[pidx];
+      blue_p <= palette_b[pidx];
+    end
+    
     //if (!display_sprite || sprite_pidx==0) begin
-    red_p   <= pidx_r;
+    /*red_p   <= pidx_r;
     green_p <= pidx_g;
-    blue_p  <= pidx_b;
+    blue_p  <= pidx_b;*/
     
     /*end else begin
       red_p   <= sprite_palette_r[sprite_pidx];
@@ -1579,41 +1646,100 @@ always @(posedge vga_clk) begin
       green_p <= sprite_palette_g[sprite_pidx];
       blue_p  <= sprite_palette_b[sprite_pidx];
     end*/
-  //end else if (colormode==2) begin
+  end else if (colormode==2) begin
     // true color!
-    /*rgb32 <= {fetch_buffer[(display_x2>>scalemode)],fetch_buffer[(display_x2>>scalemode)+1]};
-    
-    if (!display_sprite || sprite_pidx==0) begin
-      red_p <= rgb32[15:8];
-      green_p <= rgb32[7:0];
-      blue_p <= rgb32[31:24];
+    if (counter_scale != scalemode) begin
+      counter_scale <= counter_scale + 1'b1;
     end else begin
+      counter_scale <= 0;
+      //rgb <= fetch_buffer[counter_8x];
+      rgb32 <= {fetch_buffer[display_x3],fetch_buffer[display_x2]};
+      counter_8x <= counter_8x + 1'b1;
+      display_x2 <= display_x2 + 2'b10;
+      display_x3 <= display_x3 + 2'b10;
+    end
+    
+    //if (!display_sprite || sprite_pidx==0) begin
+      blue_p <= rgb32[31:24];
+      green_p <= rgb32[7:0];
+      red_p <= rgb32[15:8];
+    /*end else begin
       red_p   <= sprite_palette_r[sprite_pidx];
       green_p <= sprite_palette_g[sprite_pidx];
       blue_p  <= sprite_palette_b[sprite_pidx];
     end*/
-  /*end else if (colormode==3) begin // zorro debug
+  end else if (colormode==3) begin // zorro debug
     if (counter_y<90) begin
       if (counter_x<100)
-        blue_p <= znCFGIN?8'h00:8'hff;
+        blue_p <= zSENSEZ3?8'hff:8'h00;
       else if (counter_x<200)
-        blue_p <= znFCS?8'h00:8'hff;
+        blue_p <= znCFGIN?8'h00:8'hff;
       else if (counter_x<300)
-        blue_p <= zREAD?8'hff:8'h00;
+        blue_p <= zorro_read?8'hff:8'h00;
       else if (counter_x<400)
         blue_p <= znAS?8'h00:8'hff;
-      else if (counter_x<500)
-        blue_p <= (z3addr[31:16]=='hff00)?8'hff:8'h00;
-      else begin
+      else if (counter_x<500) begin
+        red_p <= (zaddr_autoconfig)?8'hff:8'h00;
+        blue_p <= 0;
+      end else begin
         blue_p <= 0;
         green_p <= 0;
         red_p <= 0;
       end
-    end else begin
+    end else if (counter_y<100)
+      blue_p <= 0;
+    /*else if (counter_y<110)
+      blue_p <= zaddr[22]?'hff:'h00;
+    else if (counter_y<120)
+      blue_p <= zaddr[21]?'hff:'h00;
+    else if (counter_y<130)
+      blue_p <= zaddr[20]?'hff:'h00;
+    else if (counter_y<140)
+      blue_p <= zaddr[19]?'hff:'h00;
+    else if (counter_y<150)
+      blue_p <= zaddr[18]?'hff:'h00;
+    else if (counter_y<160)
+      blue_p <= zaddr[17]?'hff:'h00;
+    else if (counter_y<170)
+      blue_p <= zaddr[16]?'hff:'h00;
+    else if (counter_y<180)
+      blue_p <= zaddr[15]?'hff:'h00;
+    else if (counter_y<190)
+      blue_p <= zaddr[14]?'hff:'h00;
+    else if (counter_y<200)
+      blue_p <= zaddr[13]?'hff:'h00;
+    else if (counter_y<210)
+      blue_p <= zaddr[12]?'hff:'h00;
+    else if (counter_y<220)
+      blue_p <= zaddr[11]?'hff:'h00;
+    else if (counter_y<230)
+      blue_p <= zaddr[10]?'hff:'h00;
+    else if (counter_y<240)
+      blue_p <= zaddr[9]?'hff:'h00;
+    else if (counter_y<250)
+      blue_p <= zaddr[8]?'hff:'h00;
+    else if (counter_y<260)
+      blue_p <= zaddr[7]?'hff:'h00;
+    else if (counter_y<270)
+      blue_p <= zaddr[6]?'hff:'h00;
+    else if (counter_y<280)
+      blue_p <= zaddr[5]?'hff:'h00;
+    else if (counter_y<290)
+      blue_p <= zaddr[4]?'hff:'h00;
+    else if (counter_y<300)
+      blue_p <= zaddr[3]?'hff:'h00;
+    else if (counter_y<310)
+      blue_p <= zaddr[2]?'hff:'h00;
+    else if (counter_y<320)
+      blue_p <= zaddr[1]?'hff:'h00;
+    else if (counter_y<330)
+      blue_p <= zaddr[0]?'hff:'h00;
+      */
+    else begin
       red_p <= 0;
       green_p <= 0;
       green_p <= 0;
-    //end*/
+    end
   end else begin
     red_p   <= 0;
     green_p <= 0;

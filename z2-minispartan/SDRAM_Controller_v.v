@@ -45,7 +45,7 @@ module SDRAM_Controller_v (
    parameter sdram_row_bits       = 13;
    parameter sdram_address_width  = 24;    // zzz
    parameter sdram_startup_cycles = 10100; // -- 100us, plus a little more, @ 100MHz
-   parameter cycles_per_refresh   = 1524;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
+   parameter cycles_per_refresh   = 3000;  // (64000*100)/4196-1 Calced as  (64ms @ 100MHz)/ 4196 rows
    
    input  clk;
    input  reset;
@@ -66,8 +66,6 @@ module SDRAM_Controller_v (
    reg [1:0]  iob_bank     = 2'b00;
    reg [15:0] data_out_reg;
    
-   
-
    output [15:0] data_out;    assign data_out       = data_out_reg;
 
    reg data_out_ready_reg;
@@ -136,6 +134,7 @@ module SDRAM_Controller_v (
    parameter s_open_in_6 = 5'b10110;
    parameter s_open_in_7 = 5'b10111;
    parameter s_open_in_8 = 5'b11000;
+   parameter s_refresh   = 5'b11001;
    reg [4:0] state = s_startup;
    
    // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
@@ -351,6 +350,10 @@ always @(posedge clk)
               iob_address <= save_row;
               iob_bank    <= save_bank;
               //ready_for_new   <= 1'b1;
+           /*end else if (startup_refresh_count >= cycles_per_refresh) begin
+              // refresh when idle
+              startup_refresh_count <= 0;
+              state <= s_refresh;*/
            end else begin
               iob_command     <= CMD_NOP;
               iob_address     <= 13'b0000000000000;
@@ -510,6 +513,10 @@ always @(posedge clk)
                state                     <= s_idle_in_4;
                iob_command               <= CMD_PRECHARGE;
                iob_address[prefresh_cmd] <= 1'b0;
+            end
+         s_refresh: begin
+               state                     <= s_idle_in_6;
+               iob_command               <= CMD_REFRESH;
             end
          //-- We should never get here, but if we do then reset the memory
          default: begin 

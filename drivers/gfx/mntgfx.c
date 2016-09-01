@@ -158,6 +158,8 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_clear_mask = set_clear_mask;
   b->fn_set_read_plane = set_read_plane;
 
+  
+
   /*b->fn_sprite_setup = sprite_setup;
   b->fn_sprite_xy = sprite_xy;
   b->fn_sprite_bitmap = sprite_bitmap;
@@ -187,7 +189,21 @@ uint32 enable_display(register struct RTGBoard* b asm("a0"), register uint16 ena
 }
 
 void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), register uint16 w asm("d0"), register int16 x asm("d1"), register int16 y asm("d2"), register uint16 format asm("d7")) {
-  debug("");
+  // 480c8010
+  
+  uint32 offset = (mem-(b->memory))>>1;
+  uint8* registers = b->registers;
+  uint16 offhi = (offset&0xffff0000)>>16;
+  uint16 offlo = offset&0xffff;
+  uint16 shift = offlo&0x0fff;
+  offlo = offlo&0xf000;
+  debug("%x %x",x,y);
+  debug("hi %x %x",offhi,offhi);
+  debug("lo %x %x",offlo,offlo);
+  
+  *((uint16*)(registers+0x38))=offhi;
+  *((uint16*)(registers+0x3a))=offlo;
+  //*((uint16*)(registers+0x0c))=8+shift;
 }
 
 void set_memory_mode(register struct RTGBoard* b asm("a0"), register uint16 format asm("d7")) {
@@ -237,18 +253,11 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   uint16 scale = 0;
   uint16 w;
   uint16 h;
+  uint8 compat_mode = 0;
   
   //debug("F %lx",b->color_format);
   b->mode_info = m;
   b->border = border;
-  
-  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
-    *((uint16*)(registers+0x48)) = 0;
-  } else if (b->color_format==9) {
-    *((uint16*)(registers+0x48)) = 2;
-  } else {
-    *((uint16*)(registers+0x48)) = 1;
-  }
 
   if (m->height>360 || m->width>640) {
     scale = 0;
@@ -262,6 +271,47 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     scale = 2;
     w = m->width+m->width+m->width;
     h = m->height+m->height+m->height;
+  }
+  
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    *((uint16*)(registers+0x48)) = 0; // colormode
+    if (scale>0) {
+      *((uint16*)(registers+0x10)) = 7; // preheat (required for 8bit modes)
+    } else {
+      *((uint16*)(registers+0x10)) = 3; // preheat (required for 8bit modes)
+    }
+  } else if (b->color_format==9) {
+    *((uint16*)(registers+0x48)) = 2;
+    *((uint16*)(registers+0x10)) = 0;
+  } else {
+    *((uint16*)(registers+0x48)) = 1;
+    *((uint16*)(registers+0x10)) = 0;
+  }
+
+  // compat mode (scummVM)
+  // TODO screen name matching?
+  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
+    if (m->width==320 && m->height==240) {
+      *((uint16*)(registers+0x58)) = 0xa0;
+      *((uint16*)(registers+0x5a)) = 0;
+      *((uint16*)(registers+0x0c)) = 0x88;
+      h-=120;
+
+      compat_mode = 1;
+    } else if (m->width==640 && m->height==480) {
+      *((uint16*)(registers+0x58)) = 0x140;
+      *((uint16*)(registers+0x5a)) = 0;
+      *((uint16*)(registers+0x0c)) = 0x88;
+      h-=2;
+      
+      compat_mode = 1;
+    }
+  }
+
+  if (!compat_mode) {
+    *((uint16*)(registers+0x58)) = 2048;
+    *((uint16*)(registers+0x5a)) = 1;
+    *((uint16*)(registers+0x0c)) = 8;
   }
   
   b->scratch[0] = scale;
@@ -285,6 +335,10 @@ uint16 get_pitch(register struct RTGBoard* b asm("a0"), uint16 width asm("d0"), 
 // TODO check this again, p96 fiddles with it sometimes
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
   //debug("%lx",addr);
+  if (addr>(uint32)b->memory && addr < (((uint32)b->memory) + b->memory_size)) {
+    // FIXME
+    addr=addr&0xfffff000;
+  }
   return addr; // direct mapping
 }
 
