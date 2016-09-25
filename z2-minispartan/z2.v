@@ -171,6 +171,7 @@ reg  ram_burst = 0;
 reg  [1:0]  ram_byte_enable;
 
 reg  [15:0] fetch_buffer [0:1299];
+//reg  [15:0] fetch_buffer2 [0:1299];
 
 reg  [10:0] fetch_x = 0;
 reg  [10:0] fetch_x2 = 0;
@@ -1328,6 +1329,7 @@ always @(posedge z_sample_clk) begin
         fetch_x2 <= fetch_x2 + 1'b1;
         
         fetch_buffer[fetch_x] <= ram_data_out;
+        //fetch_buffer2[fetch_x] <= ram_data_out;
       end
     end
       
@@ -1592,11 +1594,13 @@ always @(posedge vga_clk) begin
       blue_p  <= palette_b[fetch_buffer[counter_8x][7:0]];
       counter_8x <= counter_8x + 1'b1;
       counter_x_hi <= 0;
+      counter_scale <= 0;
     end else begin
       red_p   <= palette_r[fetch_buffer[counter_8x][15:8]];
       green_p <= palette_g[fetch_buffer[counter_8x][15:8]];
       blue_p  <= palette_b[fetch_buffer[counter_8x][15:8]];
       counter_x_hi <= 1;
+      counter_scale <= 0;
     end
     
     //if (!display_sprite || sprite_pidx==0) begin
@@ -1653,7 +1657,7 @@ always @(posedge vga_clk) begin
     end*/
   end else if (colormode==2) begin
     // true color!
-    /*if (counter_scale != scalemode) begin
+    if (counter_scale != scalemode) begin
       counter_scale <= counter_scale + 1'b1;
     end else begin
       counter_scale <= 0;
@@ -1662,10 +1666,10 @@ always @(posedge vga_clk) begin
       display_x2 <= display_x2 + 2'b10;
       display_x3 <= display_x3 + 2'b10;
     end
-    
-      blue_p <= rgb32[31:24];
-      green_p <= rgb32[7:0];
-      red_p <= rgb32[15:8];*/
+  
+    /*red_p   <= fetch_buffer[display_x2][15:8];
+    green_p <= fetch_buffer[display_x2][7:0];
+    blue_p  <= fetch_buffer2[display_x3][15:8];*/
   /*end else if (colormode==3) begin // zorro debug
     if (counter_y<90) begin
       if (counter_x<100)
