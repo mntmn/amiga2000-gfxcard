@@ -1,6 +1,4 @@
 
-#define SD_BASE 0x8f0000
-
 #define uint32 unsigned long
 #define uint8 unsigned char
 #define uint16 unsigned short
