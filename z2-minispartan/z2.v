@@ -92,11 +92,14 @@ input vga_clk
 `endif
 );
 
+reg clk_reset = 0;
+
 `ifndef SIMULATION
 clk_wiz_v3_6 DCM(
   .CLK_IN1(CLK50),
   .CLK_OUT100(z_sample_clk),
-  .CLK_OUT75(vga_clk)
+  .CLK_OUT75(vga_clk),
+  .RESET(clk_reset)
 );
 
 reg uart_reset = 0;
@@ -157,7 +160,7 @@ SdCardCtrl sdcard(
 
 `endif
 
-wire sdram_reset;
+reg  sdram_reset = 0;
 reg  ram_enable = 0;
 reg  [23:0] ram_addr = 0;
 wire [15:0] ram_data_out;
@@ -210,7 +213,7 @@ SDRAM_Controller_v sdram(
   .data_out_ready(data_out_ready),
   .data_out_queue_empty(data_out_queue_empty),
   .burst(ram_burst),
-  .refresh_enabled(ram_refresh),
+  //.refresh_enabled(ram_refresh),
 
   // signals
   .SDRAM_CLK(SDRAM_CLK),  
@@ -254,8 +257,6 @@ dvid_out dvid_out(
   .tmds_out_n(tmds_out_nbuf)
 );
 `endif
-
-assign sdram_reset = 0;
 
 // vga registers
 reg [11:0] counter_x = 0;
@@ -653,6 +654,8 @@ reg [7:0] zaddr_pidx = 0;
 
 reg [2:0] linescalecount = 0;
 
+reg [23:0] warmup_counter = 'hffffff;
+
 // =================================================================================
 // ZORRO MACHINE
 
@@ -667,19 +670,15 @@ always @(posedge z_sample_clk) begin
       z_ready <= 1; // clear XRDY (cpu wait)
       zorro_ram_read_done <= 1;
       blitter_enable <= 0;
+      warmup_counter <= 'hffffff;
       
       ram_low   <= 'h600000;
       ram_high  <= 'h600000 + ram_size-4;
       reg_low   <= 'h600000 + reg_base;
       reg_high  <= 'h600000 + reg_base + reg_size;
       
-      // poor man's z3sense
-      if (zaddr_autoconfig) begin
-        zorro_state <= Z2_CONFIGURING;
-        ZORRO3 <= 0;
-      end else if (z3addr[31:16]=='hff00)
-        zorro_state <= Z3_CONFIGURING;
-      
+      zorro_state <= PAUSE;
+      sdram_reset <= 1;
     end
     
     Z3_CONFIGURING: begin
@@ -774,7 +773,7 @@ always @(posedge z_sample_clk) begin
         end else
           zorro_state <= Z3_CONFIGURING;
       end else begin
-        if (dtack_time < 2)
+        if (dtack_time < 3)
           dtack_time <= dtack_time + 1'b1;
         else
           dtack <= 1;
@@ -872,13 +871,21 @@ always @(posedge z_sample_clk) begin
       reg_low   <= ram_low + reg_base;
       reg_high  <= ram_low + reg_base + 'h800;
       
+      sdram_reset <= 0;
       if (ZORRO3)
         zorro_state <= Z3_IDLE;
       else
         zorro_state <= Z2_IDLE;
     end
-    
+	 
     PAUSE: begin
+      // poor man's z3sense
+      if (zaddr_autoconfig) begin
+        zorro_state <= Z2_CONFIGURING;
+        ZORRO3 <= 0;
+      end else if (z3addr[31:16]=='hff00) begin
+        zorro_state <= Z3_CONFIGURING;
+      end
     end
   
     // ----------------------------------------------------------------------------------  
@@ -1018,15 +1025,15 @@ always @(posedge z_sample_clk) begin
     // ----------------------------------------------------------------------------------
     // ----------------------------------------------------------------------------------
     Z3_IDLE: begin
-      if (znCFGIN) begin
+      /*if (znCFGIN) begin
         z_confdone <= 0;
         zorro_state <= Z3_CONFIGURING;
-      end else if (znFCS_sync[2]==0) begin
+      end else*/ if (znFCS_sync[2]==0) begin
         // falling edge of /FCS
         if (z3addr=='h00000000) begin
           // reset detection
           z_confdone <= 0;
-          zorro_state <= Z3_CONFIGURING;
+          zorro_state <= RESET;
         end else if ((z3addr >= ram_low) && (z3addr <= ram_high) && !zorro_read) begin
           slaven <= 1;
           if ((znUDS_sync[2]==0) || (znLDS_sync[2]==0) || (znDS1_sync[2]==0) || (znDS0_sync[2]==0)) begin
@@ -1161,6 +1168,11 @@ always @(posedge z_sample_clk) begin
       zorro_state <= Z3_ENDCYCLE;
       
       case (zaddr_regpart)
+        'h20: data_z3_low16 <= blitter_x1;
+        'h22: data_z3_low16 <= blitter_y1;
+        'h24: data_z3_low16 <= blitter_x2;
+        'h26: data_z3_low16 <= blitter_y2;
+        'h28: data_z3_low16 <= blitter_rgb;
         'h2a: data_z3_low16 <= blitter_enable;
         
         'h60: data_z3_low16 <= sd_busy;

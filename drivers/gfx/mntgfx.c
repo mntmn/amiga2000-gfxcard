@@ -60,8 +60,8 @@ int FindCard(struct RTGBoard* b) {
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
     debug("MNT VA2000 rev 1 found.");
     b->memory = (uint8*)(cd->cd_BoardAddr);
-    b->memory_size = 0x2f0000;
-    b->registers = (((uint8*)b->memory)+0x2f0000);
+    b->memory_size = 0x5f0000;
+    b->registers = (((uint8*)b->memory)+0x5f0000);
     return 1;
   } else {
     debug("MNT VA2000 not found!");
