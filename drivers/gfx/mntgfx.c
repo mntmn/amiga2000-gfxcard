@@ -203,6 +203,7 @@ void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), re
   
   *((uint16*)(registers+0x38))=offhi;
   *((uint16*)(registers+0x3a))=offlo;
+  
   //*((uint16*)(registers+0x0c))=8+shift;
 }
 
@@ -332,7 +333,6 @@ uint16 get_pitch(register struct RTGBoard* b asm("a0"), uint16 width asm("d0"), 
   return 4096;
 }
 
-// TODO check this again, p96 fiddles with it sometimes
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
   //debug("%lx",addr);
   if (addr>(uint32)b->memory && addr < (((uint32)b->memory) + b->memory_size)) {
@@ -356,16 +356,13 @@ uint32 get_pixelclock_hz(register struct RTGBoard* b asm("a0"), struct ModeInfo*
 uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d0")) {
   uint8* registers = (uint8*)b->registers;
 
-  //debug("");
-  debug("%x",state);
-
   if (state==0) {
     // clear screen
-    blitter_wait(b);
+    /*blitter_wait(b);
     rect_fill(b,0,0,1280,720,0);
     blitter_wait(b);
     rect_fill(b,0,0,1280,720,0);
-    blitter_wait(b);
+    blitter_wait(b);*/
     
     // capture amiga video to 16bit
     *((uint16*)(registers+0x48)) = 1; // colormode
@@ -396,16 +393,21 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
   return 1-state;
 }
 
-void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4")) {
+void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint32 color asm("d4")) {
   //debug("");
   uint16 i=0;
   uint8* ptr;
   uint8 color8;
 
   uint8* registers = (uint8*)b->registers;
-  
-  //*((uint16*)0x8c0000) = b->color_format;
-  //*((uint16*)0x8c0002) = 0xbeef;
+
+  if (r) {
+    uint32 offset = (r->memory-(b->memory))>>1;
+    uint16 offhi = (offset&0xffff0000)>>16;
+    uint16 offlo = offset&0xffff;
+    *((uint16*)(registers+0x1c)) = offhi;
+    *((uint16*)(registers+0x1e)) = offlo;
+  }
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
     color8=color;
@@ -456,13 +458,21 @@ void rect_fill(register struct RTGBoard* b asm("a0"), uint16 x asm("d0"), uint16
   *((uint16*)(registers+0x24)) = x+w;
   *((uint16*)(registers+0x26)) = y+h;
   
-  *((uint16*)(registers+0x2a)) = 0x1; // enable blitter*/
+  *((uint16*)(registers+0x2a)) = 0x1; // enable blitter
 }
 
-void rect_copy(register struct RTGBoard* b asm("a0"), register void* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
+void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
   uint16 blitter_busy = 0;
   //debug("");
   uint8* registers = (uint8*)b->registers;
+
+  if (r) {
+    uint32 offset = (r->memory-(b->memory))>>1;
+    uint16 offhi = (offset&0xffff0000)>>16;
+    uint16 offlo = offset&0xffff;
+    *((uint16*)(registers+0x1c)) = offhi;
+    *((uint16*)(registers+0x1e)) = offlo;
+  }
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
     dx/=2;

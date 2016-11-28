@@ -74,6 +74,11 @@ struct ModeInfo {
   uint8 flags;
 };
 
+struct RenderInfo {
+  void* memory;
+  uint16 pitch;
+};
+
 struct RTGBoard {
   void* registers;
   void* memory;
