@@ -14,6 +14,7 @@ entity output_serialiser is
            clk_output : in  STD_LOGIC;
            strobe     : in  STD_LOGIC;
            ser_data   : in  STD_LOGIC_VECTOR (4 downto 0);
+           reset : in STD_LOGIC;
            ser_output : out STD_LOGIC);
 end output_serialiser;
 
@@ -55,7 +56,7 @@ OSERDES2_master : OSERDES2
       D4        => '0',
       IOCE      => strobe,   -- 1-bit input: Data strobe input
       OCE       => '1',      -- 1-bit input: Clock enable input
-      RST       => '0',      -- 1-bit input: Asynchrnous reset input
+      RST       => reset,      -- 1-bit input: Asynchrnous reset input
       -- T1 - T4: 1-bit (each) input: 3-state control inputs
       T1       => '0',
       T2       => '0',

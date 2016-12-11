@@ -60,8 +60,12 @@ int FindCard(struct RTGBoard* b) {
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
     debug("MNT VA2000 rev 1 found.");
     b->memory = (uint8*)(cd->cd_BoardAddr);
-    b->memory_size = 0x5f0000;
-    b->registers = (((uint8*)b->memory)+0x5f0000);
+    //b->memory_size = 0x01000000; // 0x5f0000;
+    b->memory_size = cd->cd_BoardSize-0x10000;
+    b->registers = (((uint8*)b->memory)+(cd->cd_BoardSize-0x10000));
+    debug("memory %lx",b->memory);
+    debug("memsize %lx",b->memory_size);
+    debug("regs %lx",b->registers);
     return 1;
   } else {
     debug("MNT VA2000 not found!");
@@ -112,7 +116,7 @@ int InitCard(struct RTGBoard* b) {
   b->max_res_w_24bit = max;
   b->max_res_w_32bit = max;
 
-  max = 720;
+  max = 1080;
   b->max_res_h_planar = max;
   b->max_res_h_clut = max;
   b->max_res_h_16bit = max;
@@ -140,9 +144,9 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_palette = set_palette;
   b->fn_enable_display = enable_display;
 
-  b->fn_rect_fill = rect_fill;
-  b->fn_rect_copy = rect_copy;
-  b->fn_blitter_wait = blitter_wait;
+  //b->fn_rect_fill = rect_fill;
+  //b->fn_rect_copy = rect_copy;
+  //b->fn_blitter_wait = blitter_wait;
 
   b->fn_get_pixelclock_index = get_pixelclock_index;
   b->fn_get_pixelclock_hz = get_pixelclock_hz;
@@ -158,8 +162,6 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_clear_mask = set_clear_mask;
   b->fn_set_read_plane = set_read_plane;
 
-  
-
   /*b->fn_sprite_setup = sprite_setup;
   b->fn_sprite_xy = sprite_xy;
   b->fn_sprite_bitmap = sprite_bitmap;
@@ -167,9 +169,13 @@ int InitCard(struct RTGBoard* b) {
 
   // save scalemode locally
   b->scratch[0] = 0;
+  b->scratch[1] = 2048;
+  b->scratch[2] = 11;
   b->scratch[6] = 1280;
   b->scratch[8] = 720;
-  
+
+  debug("mntgfx: InitCard done");
+
   return 1;
 }
 
@@ -249,11 +255,15 @@ void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint
   }
 }
 
+#define PITCH 4096*2
+
 void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1"), int16 border asm("d0")) {
   uint8* registers = (uint8*)b->registers;
   uint16 scale = 0;
   uint16 w;
   uint16 h;
+  uint16 pitch = 1024;
+  uint16 pitch_shift = 10;
   uint8 compat_mode = 0;
   
   //debug("F %lx",b->color_format);
@@ -264,14 +274,87 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     scale = 0;
     w = m->width;
     h = m->height;
-  } else if (m->height>240 || m->width>320) {
+  } else {
     scale = 1;
     w = m->width+m->width;
     h = m->height+m->height;
-  } else {
-    scale = 2;
-    w = m->width+m->width+m->width;
-    h = m->height+m->height+m->height;
+  }
+
+  if (m->width==1024 && m->height==768) {
+    *((uint16*)(registers+0x70)) = 1048;
+    *((uint16*)(registers+0x72)) = 1184;
+    *((uint16*)(registers+0x74)) = 1328;
+    
+    *((uint16*)(registers+0x76)) = 771;
+    *((uint16*)(registers+0x78)) = 777;
+    *((uint16*)(registers+0x7a)) = 806;
+    
+    *((uint16*)(registers+0x7c)) = 0; // 75mhz
+    *((uint16*)(registers+0x14)) = 0x4d0; // safe zone
+    
+    pitch = 1024;
+    pitch_shift = 10;
+  }
+  else if (m->width==1280 && m->height==720) {
+    *((uint16*)(registers+0x70)) = 1390;
+    *((uint16*)(registers+0x72)) = 1430;
+    *((uint16*)(registers+0x74)) = 1650;
+    
+    *((uint16*)(registers+0x76)) = 725;
+    *((uint16*)(registers+0x78)) = 730;
+    *((uint16*)(registers+0x7a)) = 750;
+    
+    *((uint16*)(registers+0x7c)) = 0; // 75mhz
+    *((uint16*)(registers+0x14)) = 0x610; // safe zone
+    
+    pitch = 2048;
+    pitch_shift = 11;
+  }
+  else if (m->width==1280 && m->height==1024) {
+    *((uint16*)(registers+0x70)) = 1328;
+    *((uint16*)(registers+0x72)) = 1440;
+    *((uint16*)(registers+0x74)) = 1600;
+    
+    *((uint16*)(registers+0x76)) = 1025;
+    *((uint16*)(registers+0x78)) = 1028;
+    *((uint16*)(registers+0x7a)) = 1066;
+    
+    *((uint16*)(registers+0x7c)) = 3; // 100mhz
+    *((uint16*)(registers+0x14)) = 0x610; // safe zone
+    
+    pitch = 2048;
+    pitch_shift = 11;
+  }
+  else if (m->width==1920 && m->height==1080) {
+    *((uint16*)(registers+0x70)) = 1992;
+    *((uint16*)(registers+0x72)) = 2000;
+    *((uint16*)(registers+0x74)) = 2287;
+    
+    *((uint16*)(registers+0x76)) = 1083;
+    *((uint16*)(registers+0x78)) = 1088;
+    *((uint16*)(registers+0x7a)) = 1109;
+    
+    *((uint16*)(registers+0x7c)) = 0; // 75mhz
+    *((uint16*)(registers+0x14)) = 0x7f0; // safe zone
+    
+    pitch = 2048;
+    pitch_shift = 11;
+  }
+  else {
+    // 800x600 for all low resolutions
+    *((uint16*)(registers+0x70)) = 856;
+    *((uint16*)(registers+0x72)) = 976;
+    *((uint16*)(registers+0x74)) = 1050;
+    
+    *((uint16*)(registers+0x76)) = 637;
+    *((uint16*)(registers+0x78)) = 643;
+    *((uint16*)(registers+0x7a)) = 666;
+    
+    *((uint16*)(registers+0x7c)) = 1; // 50mhz
+    *((uint16*)(registers+0x14)) = 0x3d0; // safe zone
+
+    pitch = 1024;
+    pitch_shift = 10;
   }
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
@@ -281,12 +364,15 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     } else {
       *((uint16*)(registers+0x10)) = 3; // preheat (required for 8bit modes)
     }
+
+    pitch/=2;
+    pitch_shift--;    
   } else if (b->color_format==9) {
-    *((uint16*)(registers+0x48)) = 2;
-    *((uint16*)(registers+0x10)) = 0;
+    *((uint16*)(registers+0x48)) = 2; // colormode
+    *((uint16*)(registers+0x10)) = 1; // preheat
   } else {
-    *((uint16*)(registers+0x48)) = 1;
-    *((uint16*)(registers+0x10)) = 0;
+    *((uint16*)(registers+0x48)) = 1; // colormode
+    *((uint16*)(registers+0x10)) = 1; // preheat
   }
 
   // compat mode (scummVM)
@@ -309,18 +395,37 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     }
   }
 
+  if (b->color_format==9) {
+    // for 32bit color, screenw is 2*hrez (fetch double the data)
+    pitch+=pitch;
+    pitch_shift+=1;
+  }
+  
   if (!compat_mode) {
-    *((uint16*)(registers+0x58)) = 2048;
-    *((uint16*)(registers+0x5a)) = 1;
-    *((uint16*)(registers+0x0c)) = 8;
+    *((uint16*)(registers+0x58)) = pitch;
+    *((uint16*)(registers+0x5c)) = pitch_shift;
+    *((uint16*)(registers+0x5a)) = 1; // burst
+    if (b->color_format==9) {
+      *((uint16*)(registers+0x0c)) = 4;
+    } else {
+      *((uint16*)(registers+0x0c)) = 8;
+    }
+    *((uint16*)(registers+0x10)) = 1;
   }
   
   b->scratch[0] = scale;
+  b->scratch[1] = pitch;
+  b->scratch[2] = pitch_shift;
   b->scratch[6] = w;
   b->scratch[8] = h;
   *((uint16*)(registers+4)) = scale;
   *((uint16*)(registers+6)) = w;
   *((uint16*)(registers+8)) = h;
+
+  if (b->color_format==9) {
+    // for 32bit color, screenw is 2*hrez (fetch double the data)
+    *((uint16*)(registers+2)) = w+w+4;
+  }
 }
 
 uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format asm("d7")) {
@@ -329,8 +434,21 @@ uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format
 }
 
 uint16 get_pitch(register struct RTGBoard* b asm("a0"), uint16 width asm("d0"), uint16 format asm("d7")) {
-  //debug("width: %x format: %x",width,format);
-  return 4096;
+  debug("width: %x format: %x",width,format);
+  if (format==RTG_COLOR_FORMAT_CLUT) {
+    //if (width==320) return 320;
+    if (width<=1024) return 1024;
+    if (width<=2048) return 2048;
+  }
+  else if (format==9) {
+    if (width<=1024) return 1024*4;
+    if (width<=2048) return 2048*4;
+  }
+  else {
+    if (width<=1024) return 1024*2;
+    if (width<=2048) return 2048*2;
+  }
+  return 1024*2;
 }
 
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
@@ -365,13 +483,13 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     blitter_wait(b);*/
     
     // capture amiga video to 16bit
-    *((uint16*)(registers+0x48)) = 1; // colormode
+    /**((uint16*)(registers+0x48)) = 1; // colormode
     *((uint16*)(registers+0x04)) = 1; // scalemode
     *((uint16*)(registers+0x46)) = 0; // sprite off
     *((uint16*)(registers+0x50)) = 1; // capture on
 
     *((uint16*)(registers+0x06)) = 0x490; // screenw
-    *((uint16*)(registers+0x08)) = 0x200; // screenh
+    *((uint16*)(registers+0x08)) = 0x200; // screenh*/
     
   } else {
     // rtg mode
@@ -386,8 +504,21 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     }
     
     *((uint16*)(registers+4)) = b->scratch[0]; // restore scalemode
+    *((uint16*)(registers+0x58)) = b->scratch[1]; // restore pitch
+    *((uint16*)(registers+0x5c)) = b->scratch[2]; // restore pitch_shift
     *((uint16*)(registers+6)) = b->scratch[6]; // restore screenw
     *((uint16*)(registers+8)) = b->scratch[8]; // restore screenh
+
+    if (b->color_format==9) {
+      *((uint16*)(registers+2)) = b->scratch[6]+b->scratch[6]+4; // screenw*2 for 32 bit
+    }
+
+    // margin
+    if (b->color_format==9) {
+      *((uint16*)(registers+0x0c)) = 4;
+    } else {
+      *((uint16*)(registers+0x0c)) = 8;
+    }
   }
   
   return 1-state;
@@ -398,15 +529,18 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   uint16 i=0;
   uint8* ptr;
   uint8 color8;
-
+  uint16 pitch = 2048*2;
   uint8* registers = (uint8*)b->registers;
-
+  uint8* gfxmem = (uint8*)b->memory;
+  
   if (r) {
     uint32 offset = (r->memory-(b->memory))>>1;
     uint16 offhi = (offset&0xffff0000)>>16;
     uint16 offlo = offset&0xffff;
     *((uint16*)(registers+0x1c)) = offhi;
     *((uint16*)(registers+0x1e)) = offlo;
+    pitch = r->pitch;
+    gfxmem = (uint8*)r->memory;
   }
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
@@ -416,20 +550,20 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
 
     // draw odd lines manually
     if (x&1) {
-      ptr = (uint8*)b->memory+y*4096+x;
+      ptr = gfxmem+y*pitch+x;
       for (i=0;i<h;i++) {
         *ptr=color8;
-        ptr+=4096;
+        ptr+=pitch;
       }
       x++;
       w--;
     }
     
     if (w&1) {
-      ptr = (uint8*)b->memory+y*4096+x+w-1;
+      ptr = gfxmem+y*pitch+x+w-1;
       for (i=0;i<h;i++) {
         *ptr=color8;
-        ptr+=4096;
+        ptr+=pitch;
       }
       w--;
     }
@@ -485,7 +619,7 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
     w*=2;
     h--;
   } else {
-    //w--;
+    if (dx>=x) w--;
     h--;
   }
 

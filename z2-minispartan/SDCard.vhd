@@ -155,7 +155,7 @@ entity SdCardCtrl is
   generic (
     FREQ_G          : real       := 150.0;     -- Master clock frequency (MHz).
     INIT_SPI_FREQ_G : real       := 0.25;  -- Slow SPI clock freq. during initialization (MHz).
-    SPI_FREQ_G      : real       := 25.0;  -- Operational SPI freq. to the SD card (MHz).
+    SPI_FREQ_G      : real       := 10.0;  -- Operational SPI freq. to the SD card (MHz).
     BLOCK_SIZE_G    : natural    := 512;  -- Number of bytes in an SD card block or sector.
     CARD_TYPE_G     : CardType_t := SDHC_CARD_E  -- Type of SD card connected to this controller.
     );
@@ -457,8 +457,10 @@ begin
               rtnData_v := true;        -- Return this data to the host.
               byteCnt_v := byteCnt_v - 1;
             elsif byteCnt_v = 2 then  -- Receive the 1st CRC byte at the end of the data block.
+              rtnData_v := true;        -- Return this data to the host.
               byteCnt_v := byteCnt_v - 1;
             elsif byteCnt_v = 1 then    -- Receive the 2nd
+              rtnData_v := true;        -- Return this data to the host.
               byteCnt_v := byteCnt_v - 1;
             else    -- Reading is done, so deselect the SD card.
               sclk_r     <= LO;
@@ -477,11 +479,11 @@ begin
               txData_v := NO_TOKEN_C;  -- Hold MOSI high for one byte before data block goes out.
             elsif byteCnt_v = WR_BLK_SZ_C - 1 then     -- Send start token.
               txData_v := START_TOKEN_C;   -- Starting token for data block.
-            elsif byteCnt_v >= 4 then   -- Now send bytes in the data block.
+            elsif byteCnt_v >= 2 then   -- Now send bytes in the data block. (this was >= 4)
               hndShk_r <= HI;           -- Signal host to provide data.
             -- The transmit shift register is loaded with data from host in the handshaking section above.
-            elsif byteCnt_v = 3 or byteCnt_v = 2 then  -- Send two phony CRC bytes at end of packet.
-              txData_v := FAKE_CRC_C;
+            --elsif byteCnt_v = 3 or byteCnt_v = 2 then  -- Send two phony CRC bytes at end of packet.
+            --  txData_v := FAKE_CRC_C;
             elsif byteCnt_v = 1 then
               bitCnt_v   := rx_v'length - 1;
               state_v    := RX_BITS;  -- Get response of SD card to the write operation.

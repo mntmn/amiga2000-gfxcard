@@ -69,14 +69,28 @@ struct SDBase* SDBase;
 //#define bug(x,args...) kprintf(x ,##args);
 //#define debug(x,args...) bug("%s:%ld " x "\n", __func__, (unsigned long)__LINE__ ,##args)
 
-void SD_InitUnit(struct SDBase * SDBase, int id);
+void SD_InitUnit(struct SDBase* SDBase, int id, uint8* registers);
 
 int __UserDevInit(struct Device* dev)
 {
   struct Library* ExpansionBase;
   ULONG i;
   struct ExecBase* SysBase = *(struct ExecBase **)4L;
-  //task_running = 0;
+  struct ConfigDev* cd = NULL;
+  uint8* registers = NULL;
+  
+  if ((ExpansionBase = (struct Library*)OpenLibrary("expansion.library",0L))==NULL) {
+    debug("failed to open expansion.library!");
+    return 0;
+  }
+
+  if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
+    debug("MNT VA2000 rev 1 found.");
+    registers = ((uint8*)cd->cd_BoardAddr)+cd->cd_BoardSize-0x10000+0x60;
+  } else {
+    debug("MNT VA2000 not found!");
+    return 0;
+  }
 
   SDBase = AllocVec(sizeof(struct SDBase), MEMF_CLEAR);
 
@@ -86,7 +100,7 @@ int __UserDevInit(struct Device* dev)
   SDBase->sd_Device = dev;
   dev->dd_Library.lib_Flags |= LIBF_DELEXP;
   
-  for (i = 0; i < SD_UNITS; i++) SD_InitUnit(SDBase, i);
+  for (i = 0; i < SD_UNITS; i++) SD_InitUnit(SDBase, i, registers);
 
   return 1;
 }
@@ -309,9 +323,9 @@ LONG SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, ULONG off64, BOOL is
 
   /* Do the IO */
   if (is_write) {
-    sderr = sdcmd_write_blocks(&sdu->sdu_SDCmd, block, data, len);
+    sderr = sdcmd_write_blocks((void*)sdu->sdu_SDCmd.iobase, block, data, len);
   } else {
-    sderr = sdcmd_read_blocks(&sdu->sdu_SDCmd, block, data, len);
+    sderr = sdcmd_read_blocks((void*)sdu->sdu_SDCmd.iobase, block, data, len);
   }
 
   if (sderr) {
@@ -573,7 +587,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
       err = IOERR_BADADDRESS;
       break;
     }
-    r1 = sdcmd_read_blocks(sdc, block, data, blocks);
+    r1 = sdcmd_read_blocks((void*)sdc->iobase, block, data, blocks);
     if (r1) {
       err = HFERR_BadStatus;
       break;
@@ -602,7 +616,7 @@ LONG SD_PerformSCSI(struct SDUnit *sdu, struct IORequest *io)
       err = IOERR_BADADDRESS;
       break;
     }
-    r1 = sdcmd_write_blocks(sdc, block, data, blocks);
+    r1 = sdcmd_write_blocks((void*)sdc->iobase, block, data, blocks);
     if (r1) {
       err = HFERR_BadStatus;
       break;
@@ -883,7 +897,7 @@ void SD_IOTask() {
 #define NEWLIST(l) ((l)->lh_Head = (struct Node *)&(l)->lh_Tail, \
                     (l)->lh_TailPred = (struct Node *)&(l)->lh_Head)
 
-void SD_InitUnit(struct SDBase* broken, int id)
+void SD_InitUnit(struct SDBase* broken, int id, uint8* registers)
 {
   struct ExecBase* SysBase = *(struct ExecBase **)4L;
   struct SDUnit *sdu = &SDBase->sd_Unit[0];
@@ -892,7 +906,7 @@ void SD_InitUnit(struct SDBase* broken, int id)
 
   switch (id) {
   case 0:
-    sdu->sdu_SDCmd.iobase  = SD_BASE;
+    sdu->sdu_SDCmd.iobase = (ULONG)registers;
     sdu->sdu_Enabled = 1;
     break;
   default:

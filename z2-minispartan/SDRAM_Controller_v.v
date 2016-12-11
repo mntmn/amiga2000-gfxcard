@@ -134,7 +134,6 @@ module SDRAM_Controller_v (
    parameter s_open_in_6 = 5'b10110;
    parameter s_open_in_7 = 5'b10111;
    parameter s_open_in_8 = 5'b11000;
-   parameter s_refresh   = 5'b11001;
    reg [4:0] state = s_startup;
    
    // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
@@ -350,10 +349,6 @@ always @(posedge clk)
               iob_address <= save_row;
               iob_bank    <= save_bank;
               //ready_for_new   <= 1'b1;
-           /*end else if (startup_refresh_count >= cycles_per_refresh) begin
-              // refresh when idle
-              startup_refresh_count <= 0;
-              state <= s_refresh;*/
            end else begin
               iob_command     <= CMD_NOP;
               iob_address     <= 13'b0000000000000;
@@ -513,10 +508,6 @@ always @(posedge clk)
                state                     <= s_idle_in_4;
                iob_command               <= CMD_PRECHARGE;
                iob_address[prefresh_cmd] <= 1'b0;
-            end
-         s_refresh: begin
-               state                     <= s_idle_in_6;
-               iob_command               <= CMD_REFRESH;
             end
          //-- We should never get here, but if we do then reset the memory
          default: begin 
