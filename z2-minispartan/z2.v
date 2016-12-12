@@ -186,7 +186,7 @@ reg [4:0] row_pitch_shift = 11; // 2048 = 1<<11
 reg [15:0] refresh_counter = 0;
 reg [23:0] refresh_addr = 0;
 reg [15:0] refresh_time = 128;
-reg [4:0] ram_refresh_lines = 2;
+reg [4:0] ram_refresh_lines = 1;
 reg display_in_refresh_lines = 0;
 
 // SDRAM
@@ -288,6 +288,7 @@ reg [15:0] zdata_in_sync;
 reg [15:0] z3_din_high_s2;
 reg [15:0] z3_din_low_s2;
 reg [31:0] z3addr;
+reg [31:0] z3addr2;
 reg [31:0] z3_mapped_addr;
 reg [31:0] z3_read_addr;
 reg [15:0] z3_read_data;
@@ -369,16 +370,20 @@ reg [1:0] scalemode = 0;
 reg [1:0] counter_scale = 0;
 
 // memory map
+parameter reg_size = 32'h001000;
 parameter autoconf_low  = 24'he80000;
 parameter autoconf_high = 24'he80080;
-reg [31:0] ram_low = 32'h48000000; //32'h600000; //
-reg [31:0] ram_size = 32'h400000; //32'h01000000; //32'h5f0000;
-//parameter ram_size = 32'h3f0000;
-//parameter reg_base = ram_size;
-parameter reg_size = 32'h001000;
-reg [31:0] ram_high = 32'h9f0000;//32'h48000000 + 32'h02000000-'h10000-4;
-reg [31:0] reg_low  = 32'h9f0000;//32'h48000000 + 32'h02000000-'h10000;
-reg [31:0] reg_high = 32'h9f1000;//32'h48000000 + 32'h02000000-'h10000 + reg_size;
+reg [31:0] z3_ram_low = 32'h42000000; 
+parameter z3_ram_size = 32'h02000000;
+reg [31:0] z3_ram_high = 32'h42000000 + z3_ram_size-'h10000-4;
+reg [31:0] z3_reg_low  = 32'h42000000 + z3_ram_size-'h10000;
+reg [31:0] z3_reg_high = 32'h42000000 + z3_ram_size-'h10000 + reg_size;
+
+reg [31:0] ram_low = 32'h600000;
+parameter ram_size = 32'h400000;
+reg [31:0] ram_high = 32'h9f0000;
+reg [31:0] reg_low  = 32'h9f0000;
+reg [31:0] reg_high = 32'h9f1000;
 
 
 reg [7:0] read_counter = 0;
@@ -478,7 +483,8 @@ reg z3addr_in_ram = 0;
 reg z3addr_in_reg = 0;
 reg z3addr_autoconfig = 0;
 
-reg [15:0] zaddr_regpart;
+reg [15:0] zaddr_regpart = 0;
+//reg [15:0] z3addr_rom = 0;
 
 // logic analyzer
 /*reg rec_enable = 0;
@@ -509,6 +515,8 @@ always @(posedge z_sample_clk) begin
   znCFGIN_sync  <= {znCFGIN_sync[1:0],znCFGIN};
   znFCS_sync <= {znFCS_sync[1:0],znFCS};
   
+  z2_addr_valid <= (znAS_sync == 5'b00000);
+  
   data_in <= zD;
   data_in_z3_low16 <= zA[22:7]; // FIXME why sample this twice?
   zdata_in_sync <= data_in;
@@ -533,6 +541,7 @@ always @(posedge z_sample_clk) begin
   if (znFCS_sync[2]==1 && znFCS_sync[1]==0) begin
     z3addr <= {zD[15:8],zA[22:1],2'b00};
   end
+  //z3addr <= z3addr2;
   z3_mapped_addr <= ((z3addr)&'h01ffffff)>>1;
   
   datastrobe_synced <= ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) 
@@ -547,9 +556,10 @@ always @(posedge z_sample_clk) begin
   else
     zaddr_autoconfig <= 1'b0;
     
+  //z3addr_rom <= z3addr[15:0];
   z3addr_zero <= (z3addr=='h00000000);
-  z3addr_in_ram <= (z3addr >= ram_low) && (z3addr < ram_high);
-  z3addr_in_reg <= (z3addr >= reg_low) && (z3addr < reg_high);
+  z3addr_in_ram <= (z3addr >= z3_ram_low) && (z3addr < z3_ram_high);
+  z3addr_in_reg <= (z3addr >= z3_reg_low) && (z3addr < z3_reg_high);
   z3addr_autoconfig <= (z3addr[31:16]=='hff00);
 end
 
@@ -592,6 +602,7 @@ reg [2:0] linescalecount = 0;
 
 reg [23:0] warmup_counter = 'hfffff;
 reg [5:0] dvid_reset_counter = 0;
+reg z2_addr_valid = 0;
 
 // =================================================================================
 // ZORRO MACHINE
@@ -654,11 +665,9 @@ always @(posedge z_sample_clk) begin
     PAUSE: begin
       // poor man's z3sense
       if (zaddr_autoconfig) begin
-        ram_size <= 'h400000;
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
       end else if (z3addr_autoconfig) begin
-        ram_size <= 32'h02000000;
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
       end
@@ -715,7 +724,7 @@ always @(posedge z_sample_clk) begin
             zorro_state <= Z3_DTACK;
             casex (z3addr[15:0])
               'hXX44: begin
-                ram_low[31:16] <= data_in;
+                z3_ram_low[31:16] <= data_in;
                 z3_confdone <= 1;
               end
               'hXX48: begin
@@ -745,9 +754,9 @@ always @(posedge z_sample_clk) begin
         dtack_time <= 0;
         if (z3_confdone) begin
           zorro_state <= CONFIGURED;
-          ram_high  <= ram_low + ram_size-'h10000-4;
-          reg_low   <= ram_low + ram_size-'h10000;
-          reg_high  <= ram_low + ram_size-'h10000 + reg_size;
+          ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
+          reg_low   <= z3_ram_low + z3_ram_size-'h10000;
+          reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;
         end else
           zorro_state <= Z3_CONFIGURING;
       end else begin
@@ -846,6 +855,10 @@ always @(posedge z_sample_clk) begin
       reg_low   <= ram_low + ram_size-'h10000;
       reg_high  <= ram_low + ram_size-'h10000 + reg_size;
       
+      z3_ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
+      z3_reg_low   <= z3_ram_low + z3_ram_size-'h10000;
+      z3_reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;
+      
       sdram_reset <= 0;
       if (ZORRO3) begin
         zorro_state <= Z3_IDLE;
@@ -865,9 +878,7 @@ always @(posedge z_sample_clk) begin
   
     // ----------------------------------------------------------------------------------
     Z2_IDLE: begin
-    
-      if (znAS_sync == 5'b00000) begin
-      
+      if (z2_addr_valid) begin
         if (dvid_reset) begin
           dvid_reset_counter <= 10;
           zorro_state <= RESET_DVID;
@@ -892,7 +903,6 @@ always @(posedge z_sample_clk) begin
           dataout_enable <= 1;
           dataout <= 1;
           
-          z_ready <= 0;
           zorro_state <= WAIT_READ3;
           
         end else if (zorro_write && zaddr_in_ram) begin
@@ -953,6 +963,7 @@ always @(posedge z_sample_clk) begin
     
     // ----------------------------------------------------------------------------------
     WAIT_READ3: begin
+      z_ready <= 0;
       if (!zorro_ram_read_request) begin
         zorro_ram_read_addr <= last_addr;
         zorro_ram_read_request <= 1;
@@ -1075,17 +1086,17 @@ always @(posedge z_sample_clk) begin
         end else begin
           // address not recognized
           slaven <= 0;
-          dtack <= 0;
-          dataout_enable <= 0;
-          dataout_z3 <= 0;
+          //dtack <= 0;
+          //dataout_enable <= 0;
+          //dataout_z3 <= 0;
         end
         
       end else begin
         // not in a cycle
         slaven <= 0;
-        dtack <= 0;
-        dataout_enable <= 0;
-        dataout_z3 <= 0;
+        //dtack <= 0;
+        //dataout_enable <= 0;
+        //dataout_z3 <= 0;
       end
     end
     
@@ -1218,7 +1229,7 @@ always @(posedge z_sample_clk) begin
         palette_b[zaddr_regpart[8:1]] <= regdata_in[7:0];
       end else
       case (zaddr_regpart)
-        'h00: refresh_time <= regdata_in[15:0];
+        //'h00: refresh_time <= regdata_in[15:0];
         'h02: screen_w <= regdata_in[11:0];
         'h04: scalemode <= regdata_in[1:0];
         'h06: begin
@@ -1349,18 +1360,18 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_REFRESH: begin
-      if (cmd_ready) begin
+      if (refresh_counter > refresh_time) begin
+        ram_enable <= 0;
+        if (data_out_queue_empty && cmd_ready) begin
+          refresh_counter <= 0;
+          ram_arbiter_state <= RAM_ROW_FETCHED;
+        end
+      end else if (cmd_ready) begin
         ram_enable <= 1;
         ram_write <= 0;
         ram_addr <= refresh_addr;
         refresh_addr <= refresh_addr + 512;
-        if (refresh_counter > refresh_time) begin
-          refresh_counter <= 0;
-          ram_enable <= 0;
-          ram_arbiter_state <= RAM_ROW_FETCHED;
-        end else begin
-          refresh_counter <= refresh_counter + 1'b1;
-        end
+        refresh_counter <= refresh_counter + 1'b1;
       end
     end
     
@@ -1507,7 +1518,7 @@ always @(posedge z_sample_clk) begin
         ram_enable  <= 1;
         
         ram_arbiter_state <= RAM_WRITING_ZORRO;
-      end else if (display_in_refresh_lines) begin
+      end else if (display_in_refresh_lines && data_out_queue_empty && cmd_ready) begin
         ram_arbiter_state <= RAM_REFRESH;
         refresh_counter <= 0;
       end
@@ -1703,15 +1714,15 @@ always @(posedge vga_clk) begin
     blue_p[7] <= rgb[15];
   end else if (colormode==2) begin
     // true color!
-    /*if (counter_scale != scalemode) begin
+    if (counter_scale != scalemode) begin
       counter_scale <= counter_scale + 1'b1;
     end else begin
-      counter_scale <= 0;*/
+      counter_scale <= 0;
       //rgb32 <= {fetch_buffer[display_x3],fetch_buffer[display_x2]};
       counter_8x <= counter_8x + 1'b1;
       display_x2 <= display_x2 + 2'b10;
       display_x3 <= display_x3 + 2'b10;
-    //end
+    end
     
     rgb32 <= {fetch_buffer[display_x3],fetch_buffer[display_x2]};
     red_p   <= rgb32[15:8];
