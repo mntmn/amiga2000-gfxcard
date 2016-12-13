@@ -20,8 +20,9 @@
 
 #include "mntsd_cmd.h"
 
-#define LOOP_TIMEOUT 5000
+//#define LOOP_TIMEOUT 5000
 #define CRC_RETRIES 3
+static uint32 LOOP_TIMEOUT=1000000;
 
 struct MNTSDRegs {
   volatile uint16 busy; // 60 also reset
@@ -75,9 +76,26 @@ static inline uint16 crc(uint16 crc, uint8 data)
   return (crc << 8) ^ crc_table[((crc >> 8) ^ data) & 0xff];
 }
 
+void sd_reset(void* regs) {
+  uint32 i=0;
+  struct MNTSDRegs* registers = (struct MNTSDRegs*)regs;
+  registers->read = 0x00;
+  registers->write = 0x00;
+  registers->addr_hi = 0x00;
+  registers->addr_lo = 0x00;
+  registers->busy = 0xffff;
+  registers->handshake = 0xffff;
+  registers->handshake = 0x00;
+  for (i=0; i<5000; i++) {
+    asm("nop");
+  }
+  registers->busy = 0;
+}
+
 uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len) {
   uint32 i=0;
   uint32 x=0;
+  uint32 k=0;
   uint32 offset=0;
   uint8 rbyte=0;
   uint32 timer=0;
@@ -87,7 +105,7 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
   uint16 addrhi;
   int problems=0;
   volatile struct MNTSDRegs* regs = (volatile struct MNTSDRegs*)registers;
-
+  
   //printf("SD read blocks: %ld (%ld)\n",block,len);
 
   regs->write = 0;
@@ -113,7 +131,7 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
     regs->addr_lo = (block+i)&0xffff;
     regs->handshake = 0x00;
     regs->read = 0xffff;
-    
+
     do {
       timer++;
       if (timer>LOOP_TIMEOUT) {
@@ -135,12 +153,12 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
       }
       rbyte = regs->data_out>>8;
       if (x==512) {
-        block_crc_actual = rbyte<<8;
+        //block_crc_actual = rbyte<<8;
       } else if (x==513) {
-        block_crc_actual |= rbyte;
+        //block_crc_actual |= rbyte;
       } else {
         data[offset+x] = rbyte;
-        block_crc = crc(block_crc,rbyte); 
+        //block_crc = crc(block_crc,rbyte); 
       }
       regs->handshake = 0xffff;
       timer = 0;
@@ -172,45 +190,58 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
 uint16 sdcmd_write_blocks(void* registers, uint32 block, uint8* data, uint32 len) {
   uint32 i=0;
   uint32 x=0;
-  uint32 j=len;
-  uint32 base = block;
+  uint32 k=0;
   uint32 timer = 0;
   uint16 block_crc=0;
   uint8 byte;
+  uint8 timeout=0;
+  uint8 retries=0;
   struct MNTSDRegs* regs = (struct MNTSDRegs*)registers;
   
   //printf("SD write blocks: %ld (%ld)\n",block,len);
   
-  regs->write = 0;
-  regs->read = 0;
-  regs->handshake = 0x00;
-  
-  while (regs->busy) {
-    timer++;
-    if (timer>LOOP_TIMEOUT) {
-      //printf("wbusy\n");
-      break;
+  for (i=0; i<len; i++) {
+    retries=0;
+  retry_write:
+
+    timeout=0;
+    timer=0;
+    
+    do {
+      timer++;
+      if (timer>LOOP_TIMEOUT) {
+        timeout|=8;
+        break;
+      }
+    } while (regs->busy);
+    if (timeout) {
+      kprintf("busy abort blk %d!\n",block+i);
+      return;
     }
-  }
-  
-  for (i=0; i<j; i++) {
-    regs->addr_hi = ((block+i)>>16)&0xffff;
-    regs->addr_lo = (block+i)&0xffff;
-    regs->write = 0xffff;
+    
+    /*regs->handshake = 0x00;
+    regs->write = 0;
+    regs->read = 0;*/
+    
     block_crc = 0;
 
     timer=0;
-    while (!regs->busy) {
-      timer++;
-      if (timer>LOOP_TIMEOUT) break;
-    }
-
-    regs->write = 0;
+    regs->addr_hi = ((block+i)>>16)&0xffff;
+    regs->addr_lo = (block+i)&0xffff;
+    regs->write = 0xffff;
+    
     for (x=0; x<514; x++) {
       timer=0;
-      while (!regs->handshake) {
+      do {
         timer++;
-        if (timer>LOOP_TIMEOUT) break;
+        if (timer>LOOP_TIMEOUT) {
+          timeout|=2;
+          break;
+        }
+      } while (!regs->handshake);
+      if (timeout) {
+        kprintf("handshake1 abort: %x\n",x);
+        return;
       }
       
       if (x==512) {
@@ -224,21 +255,43 @@ uint16 sdcmd_write_blocks(void* registers, uint32 block, uint8* data, uint32 len
       }
       
       regs->handshake = 0xffff;
+      
       timer=0;
-      while (regs->handshake) {
+      do {
         timer++;
-        if (timer>LOOP_TIMEOUT) break;
+        if (timer>LOOP_TIMEOUT) {
+          timeout|=4;
+          break;
+        }
+      } while (regs->handshake);
+      if (timeout) {
+        kprintf("handshake2 abort!\n");
+        return;
       }
-      regs->handshake = 0x00;
+      
+      regs->handshake = 0;
     }
-    //printf("WBLK %ld CRC: %x\n",block+i,block_crc);
+    // block done
+    regs->write = 0;
+
+    /*if (timeout>0) {
+      //printf("timeout blk %d map %d\n",block+i,timeout);
+      if (retries++>2) {
+        kprintf("error: giving up!\n");
+      }
+      else {
+        kprintf("RETRY! %lx\n",(block+i));
+        sd_reset(registers);    
+        goto retry_write;
+      }
+    }*/
   }
-  regs->write = 0;
+  
   return regs->err;
 }
 
 uint16 sdcmd_present(struct sdcmd* cmd) {
-  cmd->info.blocks = 1024*1024*2; // 1GB
+  cmd->info.blocks = 1024*1024*4; // 2GB
   cmd->info.block_size = 512;
   return 1;
 }
@@ -257,6 +310,8 @@ int main(int argc, char** argv) {
   struct ConfigDev* cd = NULL;
   struct MNTSDRegs* registers = NULL;
   uint8* test = (uint8*)malloc(512);
+
+  LOOP_TIMEOUT=1000000;
 
   printf("welcome to MNT VA2000 SD card tester.\n");
   
@@ -308,12 +363,17 @@ int main(int argc, char** argv) {
     int v = 0;
     numblocks=atoi(argv[2]);
 
+    if (argc>4) {
+      v = atoi(argv[4]);
+      printf("write value: %d\n",v);
+    }
+    if (argc>5) {
+      LOOP_TIMEOUT=atoi(argv[5]);
+      printf("LOOP_TIMEOUT: %d\n",LOOP_TIMEOUT);
+    }
+    
     for (i = 0; i<numblocks; i++) {
-      printf("write mode to block %d/%d!\n",block+i,block+numblocks-1);
-      if (argc>4) {
-        v = atoi(argv[4]);
-        printf("write value: %d\n",v);
-      }
+      //printf("write mode to block %d/%d!\n",block+i,block+numblocks-1);
       
       for (j=0; j<512; j++) {
         if (argc>4) {
@@ -325,8 +385,9 @@ int main(int argc, char** argv) {
 
       sdcmd_write_blocks(registers, block+i, test, 1);
     }
+    //sdcmd_write_blocks(registers, block, test, numblocks);
     
-    printf("\n");
+    printf("done\n");
   } else {
     int numblocks = 1;
     int i = 0;
@@ -338,23 +399,18 @@ int main(int argc, char** argv) {
     }
 
     for (i = 0; i<numblocks; i++) {
-      printf("sd driver read block %d/%d:\n",block+i,block+numblocks-1);
+      //printf("sd driver read block %d/%d:\n",block+i,block+numblocks-1);
       sdcmd_read_blocks(registers, block+i, test, 1);
 
       if (numblocks>1 && test[0]==block+i) {
-        printf("ok.\n");
+        //printf("ok.\n");
       } else { 
         for (j=0; j<512; j++) {
           if (j%32==0) printf("\n");
           printf("%02x",test[j]);
         }
+        printf("\n");
       }
-      printf("\n");
-
-      addr_hi=registers->addr_hi;
-      addr_lo=registers->addr_lo;
-      printf("addr hi: %hx\n",addr_hi);
-      printf("addr lo: %hx\n",addr_lo);
     }
   }
   free(test);

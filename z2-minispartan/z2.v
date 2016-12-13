@@ -186,7 +186,7 @@ reg [4:0] row_pitch_shift = 11; // 2048 = 1<<11
 reg [15:0] refresh_counter = 0;
 reg [23:0] refresh_addr = 0;
 reg [15:0] refresh_time = 128;
-reg [4:0] ram_refresh_lines = 1;
+reg [4:0] ram_refresh_lines = 0;
 reg display_in_refresh_lines = 0;
 
 // SDRAM
@@ -539,9 +539,9 @@ always @(posedge z_sample_clk) begin
   
   // sample z3addr on falling edge of /FCS
   if (znFCS_sync[2]==1 && znFCS_sync[1]==0) begin
-    z3addr <= {zD[15:8],zA[22:1],2'b00};
+    z3addr2 <= {zD[15:8],zA[22:1],2'b00};
   end
-  //z3addr <= z3addr2;
+  z3addr <= z3addr2;
   z3_mapped_addr <= ((z3addr)&'h01ffffff)>>1;
   
   datastrobe_synced <= ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) 
@@ -587,6 +587,7 @@ parameter RAM_BURST_OFF = 7;
 parameter RAM_BURST_ON = 8;
 parameter RAM_READING_BLIT = 9;
 parameter RAM_REFRESH = 10;
+parameter RAM_REFRESH_PRE = 11;
 
 reg need_row_fetch = 0;
 reg row_refreshed = 0;
@@ -1359,6 +1360,14 @@ always @(posedge z_sample_clk) begin
         ram_arbiter_state <= RAM_ROW_FETCHED;
     end
     
+    RAM_REFRESH_PRE: begin
+      ram_enable <= 0;
+      refresh_counter <= 0;
+      if (data_out_queue_empty) begin
+        ram_arbiter_state <= RAM_REFRESH;
+      end
+    end
+    
     RAM_REFRESH: begin
       if (refresh_counter > refresh_time) begin
         ram_enable <= 0;
@@ -1411,6 +1420,8 @@ always @(posedge z_sample_clk) begin
         ram_arbiter_state <= RAM_READY;
       end else if (/*counter_x < safe_x1 || */counter_x > safe_x2) begin
         // do nothing if not in safe area
+      end else if (display_in_refresh_lines && cmd_ready) begin
+        ram_arbiter_state <= RAM_REFRESH_PRE;
         
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
@@ -1518,9 +1529,6 @@ always @(posedge z_sample_clk) begin
         ram_enable  <= 1;
         
         ram_arbiter_state <= RAM_WRITING_ZORRO;
-      end else if (display_in_refresh_lines && data_out_queue_empty && cmd_ready) begin
-        ram_arbiter_state <= RAM_REFRESH;
-        refresh_counter <= 0;
       end
       
     RAM_READING_BLIT: begin
