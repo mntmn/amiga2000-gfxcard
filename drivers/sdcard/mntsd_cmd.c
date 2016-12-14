@@ -121,10 +121,11 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
   }
   
   for (i=0; i<len; i++) {
-    //retry_loop:
+    retry_loop:
     offset = i<<9;
     timer = 0;
     block_crc = 0;
+    block_crc_actual = 0;
     problems = 0;
 
     regs->addr_hi = ((block+i)>>16);
@@ -153,12 +154,12 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
       }
       rbyte = regs->data_out>>8;
       if (x==512) {
-        //block_crc_actual = rbyte<<8;
+        block_crc_actual = rbyte<<8;
       } else if (x==513) {
-        //block_crc_actual |= rbyte;
+        block_crc_actual |= rbyte;
       } else {
         data[offset+x] = rbyte;
-        //block_crc = crc(block_crc,rbyte); 
+        block_crc = crc(block_crc,rbyte); 
       }
       regs->handshake = 0xffff;
       timer = 0;
@@ -172,12 +173,12 @@ uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len)
       regs->handshake = 0x00;
     }
 
-    /*if (block_crc!=block_crc_actual && retries<CRC_RETRIES) {
-      kprintf("BLK %ld CRCex: %x\n",block+i,block_crc);
-      kprintf("CRCac: %x\n",block_crc_actual);
+    if (block_crc!=block_crc_actual && retries<CRC_RETRIES) {
+      printf("BLK %ld CRCex: %x\n",block+i,block_crc);
+      printf("CRCac: %x\n",block_crc_actual);
       retries++;
       goto retry_loop;
-      }*/
+    }
     /*if (problems>0) {
       kprintf("BLK %ld timing problems:\n",block+i);
       kprintf("%d\n",problems);
