@@ -270,6 +270,9 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   b->mode_info = m;
   b->border = border;
 
+  // set refresh timer to 0x1000
+  *((uint16*)(registers+0x82)) = 0x1000;
+
   if (m->height>360 || m->width>640) {
     scale = 0;
     w = m->width;
