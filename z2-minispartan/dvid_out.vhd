@@ -91,8 +91,8 @@ architecture Behavioral of dvid_out is
   signal rd_enable     : std_logic := '0';
   signal not_ready_yet : std_logic;
 
-  constant c_red       : std_logic_vector(1 downto 0) := (others => '0');
-  constant c_green     : std_logic_vector(1 downto 0) := (others => '0');
+  signal c_red       : std_logic_vector(1 downto 0); -- := (others => '0');
+  signal c_green     : std_logic_vector(1 downto 0); -- := (others => '0');
   signal   c_blue      : std_logic_vector(1 downto 0);
 
   signal red_s     : STD_LOGIC;
@@ -103,6 +103,8 @@ architecture Behavioral of dvid_out is
 begin   
   -- Send the pixels to the encoder
   c_blue <= vsync & hsync;
+  c_red <= vsync & hsync;
+  c_green <= vsync & hsync;
   TMDS_encoder_red:   TMDS_encoder PORT MAP(clk => clk_pixel, data => red_p,   c => c_red,   blank => blank, encoded => encoded_red);
   TMDS_encoder_green: TMDS_encoder PORT MAP(clk => clk_pixel, data => green_p, c => c_green, blank => blank, encoded => encoded_green);
   TMDS_encoder_blue:  TMDS_encoder PORT MAP(clk => clk_pixel, data => blue_p,  c => c_blue,  blank => blank, encoded => encoded_blue);
