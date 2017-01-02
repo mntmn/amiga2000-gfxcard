@@ -293,6 +293,10 @@ reg [15:0] z3_read_data;
 reg [15:0] z3_regread_hi;
 reg [15:0] z3_regread_lo;
 
+reg z2_snoop_reset_mode = 1;
+reg z_confout = 0;
+assign znCFGOUT = znCFGIN?1'b1:(~z_confout); //?1'bZ:1'b0;
+
 // zorro data output stages
 reg dataout = 0;
 reg dataout_z3 = 0;
@@ -317,9 +321,7 @@ assign zD  = (dataout_z3) ? data_z3_hi16 : (dataout ? data : 16'bzzzz_zzzz_zzzz_
 assign zA  = (dataout_z3) ? {data_z3_low16, 7'bzzzz_zzz} : 23'bzzz_zzzz_zzzz_zzzz_zzzz_zzzz;
 
 // autoconf status
-reg z_confdone = 0;
 reg z3_confdone = 0;
-assign znCFGOUT = ((~z_confdone)&&(~z3_confdone))?1'bZ:1'b0; // inspired by z3sdram
 
 // zorro synchronizers
 // (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
@@ -367,6 +369,8 @@ reg [2:0] colormode = 3;
 reg [1:0] scalemode = 0;
 reg [1:0] counter_scale = 0;
 
+reg [15:0] REVISION = 'h0002;
+
 // memory map
 parameter reg_size = 32'h001000;
 parameter autoconf_low  = 24'he80000;
@@ -404,9 +408,10 @@ reg [15:0] blitter_rgb = 'h0008; // 28
 reg [15:0] blitter_copy_rgb = 'h0000;
 reg [15:0] blitter_rgb32 [0:1];
 reg blitter_rgb32_t = 1;
-reg [3:0]  blitter_enable = 1; // 2a
+reg [2:0]  blitter_enable = 0; // 2a
 reg [23:0] blitter_base = 0;
 reg [23:0] blitter_ptr = 0;
+reg [23:0] blitter_ptr2 = 0;
 reg [11:0] blitter_curx = 0;
 reg [11:0] blitter_cury = 0;
 reg [11:0] blitter_curx2 = 0;
@@ -466,6 +471,8 @@ parameter REGREAD_POST = 24;
 
 parameter RESET_DVID = 22;
 parameter Z2_WARMUP = 23;
+parameter Z2_PRE_CONFIGURED = 26;
+parameter Z2_PRE_CONFIGURED2 = 27;
 
 reg [6:0] zorro_state = RESET;
 reg zorro_read = 0;
@@ -484,8 +491,9 @@ reg z3addr_autoconfig = 0;
 reg [15:0] zaddr_regpart = 0;
 //reg [15:0] z3addr_rom = 0;
 
+`ifdef ANALYZER
 // logic analyzer
-/*reg rec_enable = 0;
+reg rec_enable = 0;
 reg [9:0] rec_idx;
 reg rec_zreadraw [0:255];
 reg rec_zread [0:255];
@@ -495,8 +503,9 @@ reg rec_zas1 [0:255];
 reg rec_zaddr_in_ram [0:255];
 reg rec_state [0:255];
 reg rec_statew [0:255];
-reg rec_ready [0:255];*/
-//reg [3:0] rec_zaddr [0:255];
+reg rec_ready [0:255];
+reg [3:0] rec_zaddr [0:255];
+`endif
 
 reg row_fetched = 0;
 
@@ -556,7 +565,8 @@ always @(posedge z_sample_clk) begin
     zaddr_autoconfig <= 1'b0;
     
   //z3addr_rom <= z3addr[15:0];
-  z3addr_zero <= (z3addr=='h00000000);
+  z3addr_zero <= (!znRST_sync[1]); //(z3addr=='hff000000 && znCFGIN_sync[2]==0 && znFCS_sync[2]==0);
+  
   z3addr_in_ram <= (z3addr >= z3_ram_low) && (z3addr < z3_ram_high);
   z3addr_in_reg <= (z3addr >= z3_reg_low) && (z3addr < z3_reg_high);
   z3addr_autoconfig <= (z3addr[31:16]=='hff00);
@@ -600,7 +610,7 @@ reg [7:0] zaddr_pidx = 0;
 
 reg [2:0] linescalecount = 0;
 
-reg [23:0] warmup_counter = 'hfffff;
+reg [15:0] warmup_counter = 0; // 2 seconds @ 150mhz
 reg [5:0] dvid_reset_counter = 0;
 reg z2_addr_valid = 0;
 
@@ -641,7 +651,10 @@ always @(posedge z_sample_clk) begin
       v_sync_start <= 720+3;
       v_sync_end   <= 720+8;
       v_max        <= 749;
-
+      
+      z_confout <= 0;
+      z3_confdone <= 0;
+      
       scalemode <= 0;
       colormode <= 1;
       dataout_enable <= 0;
@@ -650,13 +663,14 @@ always @(posedge z_sample_clk) begin
       z_ready <= 1; // clear XRDY (cpu wait)
       zorro_ram_read_done <= 1;
       blitter_enable <= 0;
-      warmup_counter <= 'hfffff;
+      warmup_counter <= 0;
       sdram_reset <= 1;
       
       blitter_x1 <= 0;
       blitter_y1 <= 0; 
       blitter_x2 <= 1279;
       blitter_y2 <= 719;
+      blitter_ptr <= 0;
       
       ram_low   <= 'h600000;
       ram_high  <= 'h600000 + ram_size-4;
@@ -679,7 +693,7 @@ always @(posedge z_sample_clk) begin
     end
     
     Z3_CONFIGURING: begin
-      if (znCFGIN_sync[2]==0 && z3addr_autoconfig && znFCS_sync[2]==0) begin
+      if (znCFGIN_sync[2]==0 && z3addr_autoconfig && znFCS_sync[1]==0) begin
         if (zorro_read) begin
           // autoconfig ROM
           dataout_enable <= 1;
@@ -818,19 +832,16 @@ always @(posedge z_sample_clk) begin
                 ram_low[31:24] <= 8'h0;
                 ram_low[23:20] <= zdata_in_sync[15:12];
                 ram_low[15:0] <= 16'h0;
-                zorro_state <= CONFIGURED; // configured
-                z_confdone <= 1;
-                colormode <= 1;
+                zorro_state <= Z2_PRE_CONFIGURED; // configured
               end
               8'h4a: begin
                 ram_low[31:24] <= 8'h0;
                 ram_low[19:16] <= zdata_in_sync[15:12];
                 ram_low[15:0] <= 16'h0;
               end
+              
               8'h4c: begin 
-                zorro_state <= CONFIGURED; // configured, shut up
-                z_confdone <= 1;
-                colormode <= 1;
+                zorro_state <= Z2_PRE_CONFIGURED; // configured, shut up
               end
             endcase
           end
@@ -842,6 +853,19 @@ always @(posedge z_sample_clk) begin
         slaven <= 0;
       end
     end
+    
+    Z2_PRE_CONFIGURED: begin
+      if (znAS_sync[2]==1) begin
+        z_confout<=1;
+        zorro_state <= CONFIGURED;
+      end
+    end
+    
+    /*Z2_PRE_CONFIGURED2: begin
+      if (znCFGIN_sync[2:0]=='b111) begin
+        zorro_state <= Z2_IDLE;
+      end
+    end*/
     
     CONFIGURED: begin
       scalemode <= 0;
@@ -864,34 +888,32 @@ always @(posedge z_sample_clk) begin
       z3_reg_low   <= z3_ram_low + z3_ram_size-'h10000;
       z3_reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;
       
+      z_confout <= 1;
+      
       sdram_reset <= 0;
       if (ZORRO3) begin
-        zorro_state <= Z3_IDLE;
+        if (!z3addr_zero)
+          zorro_state <= Z3_IDLE;
       end else begin
-        warmup_counter <= 'hfffff;
-        zorro_state <= Z2_WARMUP;
-      end
-    end
-    
-    Z2_WARMUP: begin
-      if (warmup_counter!=0)
-        warmup_counter <= warmup_counter - 1'b1;
-      else begin
         zorro_state <= Z2_IDLE;
       end
     end
   
     // ----------------------------------------------------------------------------------
     Z2_IDLE: begin
+      if (dvid_reset) begin
+        dvid_reset_counter <= 10;
+        zorro_state <= RESET_DVID;
+      end else
+      if (znCFGIN_sync[1]==1) begin
+        // poor man's IO reset (with proper CFGIN behavior)
+        zorro_state <= RESET;
+        z2_snoop_reset_mode <= 0;
+      end else
       if (z2_addr_valid) begin
-        if (dvid_reset) begin
-          dvid_reset_counter <= 10;
-          zorro_state <= RESET_DVID;
-        end else
-        if (zaddr_autoconfig && zaddr_sync2==autoconf_low && !znCFGIN_sync[2]) begin
-          // poor man's IO reset
-          z_confdone <= 0;
-          zorro_state <= Z2_CONFIGURING;
+        // even poorer man's IO reset (single board snoop mode, does not work with early startup)
+        if (z2_snoop_reset_mode && zaddr_sync2 == 'h000004 && zorro_read && zFC2==1 && zFC0==0) begin
+          zorro_state <= RESET;
         end else if (zorro_read && zaddr_in_ram) begin
           /*if (!rec_enable) begin 
             rec_enable <= 1;
@@ -928,6 +950,7 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           
           case (zaddr_sync2[7:0])
+            //'h00: data <= REVISION;
             'h20: data <= blitter_x1;
             'h22: data <= blitter_y1;
             'h24: data <= blitter_x2;
@@ -946,7 +969,7 @@ always @(posedge z_sample_clk) begin
             'h70: data <= sd_error;
             //'h72: data <= sd_clkdiv;
             
-            default: data <= 'h0000;
+            default: data <= REVISION; //'h0000;
           endcase
         end        
       end else begin
@@ -1045,19 +1068,20 @@ always @(posedge z_sample_clk) begin
     // ----------------------------------------------------------------------------------
     // ----------------------------------------------------------------------------------
     Z3_IDLE: begin
-    
       if (dvid_reset) begin
         dvid_reset_counter <= 10;
         zorro_state <= RESET_DVID;
       end else
-    
+      if (znCFGIN_sync[1]==1 || z3addr_zero) begin
+        zorro_state <= RESET;
+      end else
       if (znFCS_sync[2]==0) begin
         // falling edge of /FCS
-        if (z3addr_zero) begin
+        //if (z3addr_autoconfig && z3addr=='hff000000 && !znCFGIN_sync[2]) begin
           // reset detection
-          z3_confdone <= 0;
-          zorro_state <= RESET;
-        end else if (z3addr_in_ram && zorro_write) begin
+          //z3_confdone <= 0;
+          //zorro_state <= RESET;
+        if (z3addr_in_ram && zorro_write) begin
           slaven <= 1;
           if ((znUDS_sync[2]==0) || (znLDS_sync[2]==0) || (znDS1_sync[2]==0) || (znDS0_sync[2]==0)) begin
             zorro_state <= Z3_WRITE_UPPER;
@@ -1192,6 +1216,8 @@ always @(posedge z_sample_clk) begin
       zorro_state <= REGREAD_POST;
       
       case (zaddr_regpart)
+        /*'h00: begin z3_regread_hi <= REVISION;
+              z3_regread_lo <= 0; end*/
         'h20: begin z3_regread_hi <= blitter_x1;
               z3_regread_lo <= blitter_y1; end // 'h22
               
@@ -1214,7 +1240,7 @@ always @(posedge z_sample_clk) begin
         /*'h72: data_z3_low16 <= sd_clkdiv;*/
         
         default: begin
-          z3_regread_hi <= 'h0000; 
+          z3_regread_hi <= REVISION; //'h0000; 
           z3_regread_lo <= 'h0000;
         end
       endcase
@@ -1266,6 +1292,11 @@ always @(posedge z_sample_clk) begin
         'h18: ram_burst_col <= regdata_in[8:0];
         'h1a: fetch_preroll <= regdata_in[10:0];*/
         
+        /*'h1a: begin
+          blitter_dirx <= regdata_in[0];
+          blitter_diry <= regdata_in[1];
+        end*/
+        
         // blitter regs
         'h1c: blitter_base[23:16] <= regdata_in[7:0];
         'h1e: blitter_base[15:0]  <= regdata_in;
@@ -1282,10 +1313,11 @@ always @(posedge z_sample_clk) begin
           blitter_curx2 <= blitter_x3;
           blitter_cury2 <= blitter_y3;
           
-          //blitter_dirx <= (blitter_x3>blitter_x4)?1'b1:1'b0;
-          //blitter_diry <= (blitter_y3>blitter_y4)?1'b1:1'b0;
+          blitter_dirx <= (blitter_x3>blitter_x4)?1'b1:1'b0;
+          blitter_diry <= (blitter_y3>blitter_y4)?1'b1:1'b0;
           
           blitter_ptr <= blitter_base + (blitter_y1 << row_pitch_shift);
+          blitter_ptr2 <= blitter_base + (blitter_y3 << row_pitch_shift);
           blitter_rgb32_t <= 1;
         end
         'h2c: blitter_x3 <= regdata_in[11:0];
@@ -1324,6 +1356,10 @@ always @(posedge z_sample_clk) begin
         'h6c: sd_data_in <= regdata_in[15:8];
       endcase
     end
+    
+    default:
+      // shouldn't happen
+      zorro_state <= CONFIGURED;
 
   endcase
 
@@ -1348,7 +1384,7 @@ always @(posedge z_sample_clk) begin
         ram_burst <= 0;
         ram_arbiter_state <= RAM_BURST_OFF;
       end else begin
-        ram_burst <= 1; //burst_enabled; // FIXME
+        ram_burst <= 1;
         ram_arbiter_state <= RAM_BURST_ON;
       end
     end
@@ -1364,7 +1400,7 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if (fetch_x == (screen_w + margin_x)) begin
+      if (fetch_x >= (screen_w + margin_x)) begin
         row_fetched <= 1; // row completely fetched
         ram_burst <= 0;
         ram_arbiter_state <= RAM_READY;
@@ -1373,7 +1409,7 @@ always @(posedge z_sample_clk) begin
         ram_enable <= 1;
         ram_write <= 0;
         ram_byte_enable <= 'b11;
-        ram_addr  <= ram_addr + 1'b1; // fetch_y + fetch_x; //2; //((fetch_y << 11) | fetch_x2); // burst incremented
+        ram_addr  <= ram_addr + 1'b1; // burst incremented
       
         fetch_x <= fetch_x + 1'b1;
         fetch_x2 <= fetch_x2 + 1'b1;
@@ -1397,7 +1433,7 @@ always @(posedge z_sample_clk) begin
         end
         
         ram_arbiter_state <= RAM_READY;
-      end else if (/*counter_x < safe_x1 || */counter_x > safe_x2) begin
+      end else if (counter_x > safe_x2) begin
         // do nothing if not in safe area
         
       // BLITTER ----------------------------------------------------------------
@@ -1427,11 +1463,11 @@ always @(posedge z_sample_clk) begin
         end
       end else if (blitter_enable>=2) begin
         blitter_enable <= 0;
-      /*end else if (blitter_enable==2 && cmd_ready) begin
+      end else if (blitter_enable==2 && cmd_ready) begin
         // block copy read
         if (data_out_queue_empty) begin
           ram_byte_enable <= 'b11;
-          ram_addr    <= blitter_base+(blitter_cury2<<11)+blitter_curx2; // FIXME
+          ram_addr    <= blitter_ptr2+blitter_curx2;
           ram_write   <= 0;
           ram_enable  <= 1;
           ram_arbiter_state <= RAM_READING_BLIT;
@@ -1440,7 +1476,7 @@ always @(posedge z_sample_clk) begin
         
       end else if (blitter_enable==4 && cmd_ready) begin
         // block copy write
-        ram_addr    <= blitter_base+(blitter_cury<<11)+blitter_curx; // FIXME
+        ram_addr    <= blitter_ptr+blitter_curx;
         ram_data_in <= blitter_copy_rgb;
         ram_write   <= 1;
         ram_enable  <= 1;
@@ -1459,11 +1495,15 @@ always @(posedge z_sample_clk) begin
         end else if (blitter_diry == 0) begin
           blitter_curx <= blitter_x1;
           blitter_curx2 <= blitter_x3;
+          blitter_ptr <= blitter_ptr + row_pitch;
+          blitter_ptr2 <= blitter_ptr2 + row_pitch;
           blitter_cury <= blitter_cury + 1'b1;
           blitter_cury2 <= blitter_cury2 + 1'b1;
         end else begin
           blitter_curx <= blitter_x1;
           blitter_curx2 <= blitter_x3;
+          blitter_ptr <= blitter_ptr - row_pitch;
+          blitter_ptr2 <= blitter_ptr2 - row_pitch;
           blitter_cury <= blitter_cury - 1'b1;
           blitter_cury2 <= blitter_cury2 - 1'b1;
         end
@@ -1474,7 +1514,7 @@ always @(posedge z_sample_clk) begin
           blitter_enable <= 0;
         else
           blitter_enable <= 2;
-        ram_enable <= 0;*/
+        ram_enable <= 0;
         
       // ZORRO READ/WRITE ----------------------------------------------
       end else if (blitter_enable==0 && zorro_ram_read_request && cmd_ready) begin
@@ -1552,6 +1592,10 @@ always @(posedge z_sample_clk) begin
       ram_arbiter_state <= RAM_ROW_FETCHED;
     end
     
+    default:
+      // should also never happen
+      ram_arbiter_state <= RAM_ROW_FETCHED;
+    
   endcase
 end
 
@@ -1619,7 +1663,42 @@ always @(posedge vga_clk) begin
     green_p <= 0;
     blue_p  <= 0;
   /*end else if (counter_y>=590) begin
-    if (counter_y<600) begin
+    if (counter_x<110) begin
+      if (zorro_state[4]) green_p <= 8'hff;
+      else green_p <= 8'h20;
+    end else if (counter_x<120) begin
+      if (zorro_state[3]) green_p <= 8'hff;
+      else green_p <= 8'h40;
+    end else if (counter_x<130) begin
+      if (zorro_state[2]) green_p <= 8'hff;
+      else green_p <= 8'h20;
+    end else if (counter_x<140) begin
+      if (zorro_state[1]) green_p <= 8'hff;
+      else green_p <= 8'h40;
+    end else if (counter_x<150) begin
+      if (zorro_state[0]) green_p <= 8'hff;
+      else green_p <= 8'h20;
+    end else if (counter_x<160) begin
+      green_p <= 0;
+    
+    end else if (counter_x<170) begin
+      if (need_row_fetch) green_p <= 8'hff;
+      else green_p <= 8'h20;
+    end else if (counter_x<180) begin
+      if (cmd_ready) green_p <= 8'hff;
+      else green_p <= 8'h40;
+    end else if (counter_x<190) begin
+      if (blitter_enable[0]) green_p <= 8'hff;
+      else green_p <= 8'h20;
+    end else if (counter_x<200) begin
+      if (zorro_ram_read_request) green_p <= 8'hff;
+      else green_p <= 8'h40;
+    end else if (counter_x<210) begin
+      if (zorro_ram_read_done) green_p <= 8'hff;
+      else green_p <= 8'h40;
+    */
+    
+    /*if (counter_y<600) begin
       if (rec_zreadraw[counter_x]) green_p <= 8'hff;
       else green_p <= 0;
     end else if (counter_y<610) begin
