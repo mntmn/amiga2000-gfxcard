@@ -1049,14 +1049,6 @@ always @(posedge z_sample_clk) begin
     end
     
     RESET_DVID: begin
-      /*ram_arbiter_state <= RAM_READY;
-      zorro_ram_write_request <= 0;
-      zorro_ram_read_request <= 0;
-      zorro_ram_read_done <= 1;
-      fetch_line_y <= 0;
-      fetch_x <= 0;
-      row_fetched <= 1;*/
-      
       if (dvid_reset_counter==0) begin
         dvid_reset <= 0;
         if (ZORRO3)
@@ -1433,13 +1425,11 @@ always @(posedge z_sample_clk) begin
         fetch_line_y <= need_row_fetch_y;
         //linescalecount <= 0;
         ram_arbiter_state <= RAM_READY;
-        
-      // FIXME need better solution, this causes total lockup and slowness
       end else if (counter_x > h_max-safe_x2) begin
         // do nothing if not in safe area
         
       // BLITTER ----------------------------------------------------------------
-      /*end else if (blitter_enable==1 && cmd_ready) begin
+      end else if (blitter_enable==1 && cmd_ready) begin
         if (colormode==2) begin
           blitter_rgb <= blitter_rgb32[blitter_rgb32_t];
         end
@@ -1462,7 +1452,7 @@ always @(posedge z_sample_clk) begin
           blitter_cury <= 0;
           blitter_enable <= 0;
           //ram_enable <= 0;
-        end*/
+        end
       /*end else if (blitter_enable==2 && cmd_ready) begin
         // block copy read
         if (data_out_queue_empty) begin
@@ -1529,8 +1519,8 @@ always @(posedge z_sample_clk) begin
         ram_arbiter_state <= RAM_WRITING_ZORRO_PRE;
       end else if (/*blitter_enable==0 &&*/ refresh_counter>refresh_time && !zorro_ram_read_request && !zorro_ram_write_request && cmd_ready) begin
         ram_arbiter_state <= RAM_REFRESH_PRE;
-      end else if (blitter_enable) begin
-        blitter_enable <= 0;
+      /*end else if (blitter_enable) begin
+        blitter_enable <= 0;*/
       end else
         refresh_counter <= refresh_counter + 1;
     
@@ -1681,7 +1671,7 @@ always @(posedge vga_clk) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;
-  end else if (counter_y>=590) begin
+  /*end else if (counter_y>=590) begin
     if (counter_x<110) begin
       if (zorro_state[4]) green_p <= 8'hff;
       else green_p <= 8'h20;
@@ -1716,7 +1706,7 @@ always @(posedge vga_clk) begin
       if (ram_arbiter_state[0]) green_p <= 8'hff;
       else green_p <= 8'h20;
       
-    /*end else if (counter_x<220) begin
+    end else if (counter_x<220) begin
       green_p <= 0;
     end else if (counter_x<230) begin
       if (cmd_ready) green_p <= 8'hff;
@@ -1729,11 +1719,11 @@ always @(posedge vga_clk) begin
       else green_p <= 8'h40;
     end else if (counter_x<260) begin
       if (zorro_ram_read_done) green_p <= 8'hff;
-      else green_p <= 8'h40;*/
+      else green_p <= 8'h40;
     end else begin
       green_p <= 0;
       blue_p <= 0;
-    end
+    end*/
     
     /*if (counter_y<600) begin
       if (rec_zreadraw[counter_x]) green_p <= 8'hff;

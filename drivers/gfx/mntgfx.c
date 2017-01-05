@@ -56,7 +56,7 @@ int FindCard(struct RTGBoard* b) {
     debug("failed to open expansion.library!");
     return 0;
   }
-
+  
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
     debug("MNT VA2000 rev 1 found.");
     b->memory = (uint8*)(cd->cd_BoardAddr);
@@ -190,7 +190,7 @@ void init_dac(register struct RTGBoard* b asm("a0"), register uint16 format asm(
 
 // toggle amiga video / rtg
 uint32 enable_display(register struct RTGBoard* b asm("a0"), register uint16 enabled asm("d0")) {
-  debug("enabled: %x",enabled);
+  //debug("enabled: %x",enabled);
   return 1;
 }
 
@@ -203,9 +203,6 @@ void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), re
   uint16 offlo = offset&0xffff;
   uint16 shift = offlo&0x0fff;
   offlo = offlo&0xf000;
-  debug("%x %x",x,y);
-  debug("hi %x %x",offhi,offhi);
-  debug("lo %x %x",offlo,offlo);
   
   *((uint16*)(registers+0x38))=offhi;
   *((uint16*)(registers+0x3a))=offlo;
@@ -233,7 +230,7 @@ int is_vsynced(register struct RTGBoard* b asm("a0")) {
   return 0;
 }
 void set_clock(register struct RTGBoard* b asm("a0")) {
-  debug("");
+  //debug("");
 }
 void set_palette(register struct RTGBoard* b asm("a0"),uint16 idx asm("d0"),uint16 len asm("d1")) {
   int i=0;
@@ -271,7 +268,7 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   b->border = border;
 
   // set refresh timer to 0x1000
-  *((uint16*)(registers+0x82)) = 0x1000;
+  //*((uint16*)(registers+0x82)) = 0x1000;
 
   if (m->height>360 || m->width>640) {
     scale = 0;
@@ -281,6 +278,8 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     scale = 1;
     w = m->width+m->width;
     h = m->height+m->height;
+    
+    if (h<480) h=480;
   }
 
   if (m->width==1024 && m->height==768) {
@@ -293,7 +292,7 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x7a)) = 806;
     
     *((uint16*)(registers+0x7c)) = 0; // 75mhz
-    *((uint16*)(registers+0x14)) = 0x4d0; // safe zone
+    //*((uint16*)(registers+0x14)) = 0x4d0; // safe zone
     
     pitch = 1024;
     pitch_shift = 10;
@@ -308,7 +307,7 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x7a)) = 750;
     
     *((uint16*)(registers+0x7c)) = 0; // 75mhz
-    *((uint16*)(registers+0x14)) = 0x610; // safe zone
+    //*((uint16*)(registers+0x14)) = 0x610; // safe zone
     
     pitch = 2048;
     pitch_shift = 11;
@@ -323,7 +322,7 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x7a)) = 1066;
     
     *((uint16*)(registers+0x7c)) = 3; // 100mhz
-    *((uint16*)(registers+0x14)) = 0x610; // safe zone
+    //*((uint16*)(registers+0x14)) = 0x610; // safe zone
     
     pitch = 2048;
     pitch_shift = 11;
@@ -338,23 +337,22 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x7a)) = 1109;
     
     *((uint16*)(registers+0x7c)) = 0; // 75mhz
-    *((uint16*)(registers+0x14)) = 0x7f0; // safe zone
+    //*((uint16*)(registers+0x14)) = 0x7f0; // safe zone
     
     pitch = 2048;
     pitch_shift = 11;
   }
   else {
-    // 800x600 for all low resolutions
-    *((uint16*)(registers+0x70)) = 856;
-    *((uint16*)(registers+0x72)) = 976;
-    *((uint16*)(registers+0x74)) = 1050;
+    *((uint16*)(registers+0x70)) = 832; // 856;
+    *((uint16*)(registers+0x72)) = 896; // 976;
+    *((uint16*)(registers+0x74)) = 1048; // 1050;
     
-    *((uint16*)(registers+0x76)) = 637;
-    *((uint16*)(registers+0x78)) = 643;
-    *((uint16*)(registers+0x7a)) = 666;
+    *((uint16*)(registers+0x76)) = 601; // 637;
+    *((uint16*)(registers+0x78)) = 604; // 643;
+    *((uint16*)(registers+0x7a)) = 631; // 666;
     
     *((uint16*)(registers+0x7c)) = 1; // 50mhz
-    *((uint16*)(registers+0x14)) = 0x3d0; // safe zone
+    //*((uint16*)(registers+0x14)) = 0x3d0; // safe zone
 
     pitch = 1024;
     pitch_shift = 10;
@@ -378,43 +376,21 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     *((uint16*)(registers+0x10)) = 1; // preheat
   }
 
-  // compat mode (scummVM)
-  // TODO screen name matching?
-  if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
-    if (m->width==320 && m->height==240) {
-      *((uint16*)(registers+0x58)) = 0xa0;
-      *((uint16*)(registers+0x5a)) = 0;
-      *((uint16*)(registers+0x0c)) = 0x88;
-      h-=120;
-
-      compat_mode = 1;
-    } else if (m->width==640 && m->height==480) {
-      *((uint16*)(registers+0x58)) = 0x140;
-      *((uint16*)(registers+0x5a)) = 0;
-      *((uint16*)(registers+0x0c)) = 0x88;
-      h-=2;
-      
-      compat_mode = 1;
-    }
-  }
-
   if (b->color_format==9) {
     // for 32bit color, screenw is 2*hrez (fetch double the data)
     pitch+=pitch;
     pitch_shift+=1;
   }
   
-  if (!compat_mode) {
-    *((uint16*)(registers+0x58)) = pitch;
-    *((uint16*)(registers+0x5c)) = pitch_shift;
-    *((uint16*)(registers+0x5a)) = 1; // burst
-    if (b->color_format==9) {
-      *((uint16*)(registers+0x0c)) = 4;
-    } else {
-      *((uint16*)(registers+0x0c)) = 8;
-    }
-    *((uint16*)(registers+0x10)) = 1;
+  *((uint16*)(registers+0x58)) = pitch;
+  *((uint16*)(registers+0x5c)) = pitch_shift;
+  //*((uint16*)(registers+0x5a)) = 1; // burst
+  if (b->color_format==9) {
+    *((uint16*)(registers+0x0c)) = 4;
+  } else {
+    *((uint16*)(registers+0x0c)) = 8;
   }
+  *((uint16*)(registers+0x10)) = 1;
   
   b->scratch[0] = scale;
   b->scratch[1] = pitch;
@@ -496,7 +472,7 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     
   } else {
     // rtg mode
-    *((uint16*)(registers+0x50)) = 0;
+    //*((uint16*)(registers+0x50)) = 0;
     
     if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
       *((uint16*)(registers+0x48)) = 0;
@@ -505,17 +481,19 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     } else {
       *((uint16*)(registers+0x48)) = 1;
     }
-    
+
+    /*
     *((uint16*)(registers+4)) = b->scratch[0]; // restore scalemode
     *((uint16*)(registers+0x58)) = b->scratch[1]; // restore pitch
     *((uint16*)(registers+0x5c)) = b->scratch[2]; // restore pitch_shift
     *((uint16*)(registers+6)) = b->scratch[6]; // restore screenw
     *((uint16*)(registers+8)) = b->scratch[8]; // restore screenh
-
+    
     if (b->color_format==9) {
       *((uint16*)(registers+2)) = b->scratch[6]+b->scratch[6]+4; // screenw*2 for 32 bit
     }
-
+    */
+    
     // margin
     if (b->color_format==9) {
       *((uint16*)(registers+0x0c)) = 4;
@@ -532,7 +510,7 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   uint16 i=0;
   uint8* ptr;
   uint8 color8;
-  uint16 pitch = 2048*2;
+  uint16 pitch = 1024;
   uint8* registers = (uint8*)b->registers;
   uint8* gfxmem = (uint8*)b->memory;
   
@@ -602,6 +580,7 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   uint16 blitter_busy = 0;
   //debug("");
   uint8* registers = (uint8*)b->registers;
+  uint16 pitch = 1024;
 
   if (r) {
     uint32 offset = (r->memory-(b->memory))>>1;
@@ -609,6 +588,7 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
     uint16 offlo = offset&0xffff;
     *((uint16*)(registers+0x1c)) = offhi;
     *((uint16*)(registers+0x1e)) = offlo;
+    pitch = r->pitch;
   }
   
   if (b->color_format==RTG_COLOR_FORMAT_CLUT) {
@@ -630,12 +610,12 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
     *((uint16*)(registers+0x22)) = dy;
     *((uint16*)(registers+0x26)) = dy+h;
     *((uint16*)(registers+0x2e)) = y;
-    *((uint16*)(registers+0x32)) = y+h;
+    *((uint16*)(registers+0x32)) = (y+h);
   } else {
     *((uint16*)(registers+0x22)) = dy+h;
     *((uint16*)(registers+0x26)) = dy;
-    *((uint16*)(registers+0x2e)) = y+h;
-    *((uint16*)(registers+0x32)) = y;
+    *((uint16*)(registers+0x2e)) = (y+h);
+    *((uint16*)(registers+0x32)) = (y);
   }
 
   if (dx<x) {
