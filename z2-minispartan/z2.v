@@ -81,9 +81,9 @@ reg clk_reset=0;
 clk_wiz_v3_6 DCM(
   .CLK_IN1(CLK50),
   .CLK_OUT1(z_sample_clk),
-  .CLK_OUT2(vga_clk_100),
+  .CLK_OUT2(vga_clk_50),
   .CLK_OUT3(vga_clk_75),
-  .CLK_OUT4(vga_clk_50),
+  .CLK_OUT4(vga_clk_40),
   .LOCKED(clock_locked)
 );
 
@@ -93,19 +93,20 @@ reg [1:0] vga_clk_sel = 0;
 // 00 == 75mhz
 // 01 == 50mhz
 // 11 == 100mhz
+// #(.CLK_SEL_TYPE("ASYNC"))
 
-/*BUFGMUX #(.CLK_SEL_TYPE("ASYNC")) vga_clk_mux1(
+BUFGMUX vga_clk_mux1(
   .O(vga_clk_step1), 
-  .I0(vga_clk_50),
-  .I1(vga_clk_100),
+  .I0(vga_clk_40),
+  .I1(vga_clk_50),
   .S(vga_clk_sel[1])
-);*/
+);
 
 // #(.CLK_SEL_TYPE("ASYNC")) 
 BUFGMUX vga_clk_mux2(
   .O(vga_clk), 
   .I0(vga_clk_75),
-  .I1(vga_clk_50),
+  .I1(vga_clk_step1),
   .S(vga_clk_sel[0])
 );
 
@@ -333,7 +334,7 @@ reg [2:0] znUDS_sync = 3'b000;
 reg [2:0] znLDS_sync = 3'b000;
 reg [2:0] znDS1_sync = 3'b000;
 reg [2:0] znDS0_sync = 3'b000;
-reg [1:0] znRST_sync = 2'b11;
+reg [1:0] znRST_sync = 3'b111;
 reg [4:0] zREAD_sync = 5'b00000;
 reg [1:0] zDOE_sync = 2'b00;
 reg [1:0] zE7M_sync = 2'b00;
@@ -370,7 +371,7 @@ reg [2:0] colormode = 3;
 reg [1:0] scalemode = 0;
 reg [1:0] counter_scale = 0;
 
-reg [15:0] REVISION = 'h0002;
+reg [15:0] REVISION = 'h0003;
 
 // memory map
 parameter reg_size = 32'h001000;
@@ -484,6 +485,8 @@ reg zaddr_in_ram = 0;
 reg zaddr_in_reg = 0;
 reg zaddr_autoconfig = 0;
 
+reg z_cfgin = 0;
+reg z_cfgin_lo = 0;
 reg z_reset = 0;
 reg z3addr_in_ram = 0;
 reg z3addr_in_reg = 0;
@@ -566,7 +569,9 @@ always @(posedge z_sample_clk) begin
     zaddr_autoconfig <= 1'b0;
     
   //z3addr_rom <= z3addr[15:0];
-  z_reset <= (!znRST_sync[1]); //(z3addr=='hff000000 && znCFGIN_sync[2]==0 && znFCS_sync[2]==0);
+  z_reset <= (znRST_sync==3'b000);
+  z_cfgin <= (znCFGIN_sync==3'b000);
+  z_cfgin_lo <= (znCFGIN_sync==3'b111);
   
   z3addr_in_ram <= (z3addr >= z3_ram_low) && (z3addr < z3_ram_high);
   z3addr_in_reg <= (z3addr >= z3_reg_low) && (z3addr < z3_reg_high);
@@ -637,10 +642,9 @@ always @(posedge z_sample_clk) begin
     end
   end*/
   
-  if (znCFGIN_sync[1]==1 || z_reset) begin
+  if (z_cfgin_lo || z_reset) begin
     zorro_state <= RESET;
-  end
-  
+  end else
   case (zorro_state)
     RESET: begin
       vga_clk_sel  <= 0;
@@ -680,7 +684,7 @@ always @(posedge z_sample_clk) begin
       reg_low   <= 'h600000 + ram_size;
       reg_high  <= 'h600000 + ram_size + reg_size;
       
-      if (clock_locked && znRST_sync == 2'b11)
+      if (clock_locked && znRST_sync[1] == 1'b1)
         zorro_state <= PAUSE;
     end
     
@@ -696,7 +700,7 @@ always @(posedge z_sample_clk) begin
     end
     
     Z3_CONFIGURING: begin
-      if (znCFGIN_sync[2]==0 && z3addr_autoconfig && znFCS_sync[1]==0) begin
+      if (z_cfgin && z3addr_autoconfig && znFCS_sync[1]==0) begin
         if (zorro_read) begin
           // autoconfig ROM
           dataout_enable <= 1;
@@ -863,12 +867,6 @@ always @(posedge z_sample_clk) begin
         zorro_state <= CONFIGURED;
       end
     end
-    
-    /*Z2_PRE_CONFIGURED2: begin
-      if (znCFGIN_sync[2:0]=='b111) begin
-        zorro_state <= Z2_IDLE;
-      end
-    end*/
     
     CONFIGURED: begin
       scalemode <= 0;
@@ -1227,13 +1225,11 @@ always @(posedge z_sample_clk) begin
         'h70: begin z3_regread_hi <= sd_error; z3_regread_lo <= 0; end
         /*'h72: data_z3_low16 <= sd_clkdiv;*/
         
-        'h80: begin z3_regread_hi <= ram_arbiter_state; z3_regread_lo <= zorro_state; end
-        'h84: begin z3_regread_hi <= counter_x; z3_regread_lo <= counter_y; end
-        'h88: begin z3_regread_hi <= h_max; z3_regread_lo <= v_max; end
-        'h8c: begin z3_regread_hi <= fetch_x; z3_regread_lo <= 0; end
+        //'h80: begin z3_regread_hi <= ram_arbiter_state; z3_regread_lo <= zorro_state; end
+        /*'h8c: begin z3_regread_hi <= fetch_x; z3_regread_lo <= 0; end
         'h90: begin z3_regread_hi <= fetch_y[23:16]; z3_regread_lo <= fetch_y[15:0]; end
         'h94: begin z3_regread_hi <= data_out_ready; z3_regread_lo <= ram_enable; end
-        'h98: begin z3_regread_hi <= ram_write; z3_regread_lo <= 0; end
+        'h98: begin z3_regread_hi <= ram_write; z3_regread_lo <= 0; end*/
         
         default: begin
           z3_regread_hi <= REVISION; //'h0000; 
@@ -1419,13 +1415,13 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_ROW_FETCHED:
-      if ((need_row_fetch_y!=fetch_line_y) && (counter_x > h_max-safe_x2)) begin
+      if ((need_row_fetch_y!=fetch_line_y) && (x_safe_area)) begin
         row_fetched <= 0;
         fetch_x <= 0;
         fetch_line_y <= need_row_fetch_y;
         //linescalecount <= 0;
         ram_arbiter_state <= RAM_READY;
-      end else if (counter_x > h_max-safe_x2) begin
+      end else if (x_safe_area) begin
         // do nothing if not in safe area
         
       // BLITTER ----------------------------------------------------------------
@@ -1619,6 +1615,8 @@ reg display_sprite = 0;
 reg [4:0] preheat_x = 0;
 reg preheat = 0;
 
+reg x_safe_area = 0;
+
 always @(posedge vga_clk) begin
   if (counter_x >= h_max-preheat_x && !preheat) begin
     counter_8x <= margin_x;
@@ -1630,6 +1628,8 @@ always @(posedge vga_clk) begin
     
     preheat <= 1;
   end
+  
+  x_safe_area <= (counter_x > h_max-safe_x2);
   
   if (counter_x >= h_max) begin
     counter_x <= 0;
@@ -1646,7 +1646,7 @@ always @(posedge vga_clk) begin
     if (counter_x==h_max-fetch_preroll) begin
       if (counter_y<screen_h-1'b1)
         need_row_fetch_y <= (counter_y>>scalemode)+1'b1;
-      else //if (counter_y==screen_h-1'b1)
+      else
         need_row_fetch_y <= 0;
     end
   end
