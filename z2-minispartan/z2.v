@@ -84,6 +84,7 @@ clk_wiz_v3_6 DCM(
   .CLK_OUT2(vga_clk_50),
   .CLK_OUT3(vga_clk_75),
   .CLK_OUT4(vga_clk_40),
+  .CLK_OUT5(sd_clk),
   .LOCKED(clock_locked)
 );
 
@@ -95,19 +96,21 @@ reg [1:0] vga_clk_sel = 0;
 // 11 == 100mhz
 // #(.CLK_SEL_TYPE("ASYNC"))
 
-BUFGMUX vga_clk_mux1(
+/*BUFGMUX vga_clk_mux1(
   .O(vga_clk_step1), 
   .I0(vga_clk_40),
   .I1(vga_clk_50),
   .S(vga_clk_sel[1])
-);
+);*/
 
+reg vga_clk_sel0_latch = 0;
 // #(.CLK_SEL_TYPE("ASYNC")) 
 BUFGMUX vga_clk_mux2(
   .O(vga_clk), 
   .I0(vga_clk_75),
-  .I1(vga_clk_step1),
-  .S(vga_clk_sel[0])
+  .I1(vga_clk_40),
+  //.I1(vga_clk_step1),
+  .S(vga_clk_sel0_latch)
 );
 
 // sd card interface
@@ -128,7 +131,7 @@ wire sd_handshake_out;
 wire [15:0] sd_clkdiv;
 
 SdCardCtrl sdcard(
-  .clk_i(z_sample_clk),
+  .clk_i(sd_clk), //z_sample_clk),
   .reset_i(sd_reset),
   .rd_i(sd_read),
   .wr_i(sd_write),
@@ -273,7 +276,7 @@ reg [11:0] screen_w = 1280;
 reg [11:0] screen_h = 720;
 
 // zorro port buffers / flags
-reg ZORRO3 = 1;
+reg ZORRO3 = 0; // CHECK CHECK 1;
 reg [23:0] zaddr; // zorro 2 address
 reg [31:0] zaddr_sync;
 reg [31:0] zaddr_sync2;
@@ -297,7 +300,7 @@ reg [15:0] z3_regread_lo;
 
 reg z2_snoop_reset_mode = 1;
 reg z_confout = 0;
-assign znCFGOUT = znCFGIN?1'b1:(~z_confout); //?1'bZ:1'b0;
+assign znCFGOUT = znCFGIN?1'b1:(~z_confout);
 
 // zorro data output stages
 reg dataout = 0;
@@ -313,8 +316,9 @@ assign zDIR3     = dataout_z3; // a16-a23 <- input
 assign zDIR4     = dataout_z3; // a8-a15 <- input
 
 reg z_ready = 'b1;
-assign zXRDY  = z_ready?1'bZ:1'b0; //works only if bZ?
-assign znCINH = 1; //1'bZ; //0; // Z2 = /OVR
+reg z_ready_latch = 'b1;
+assign zXRDY  = z_ready_latch?1'bZ:1'b0; //works only if bZ?  1'bZ
+assign znCINH = 1; // Z2 = /OVR
 
 assign znSLAVEN = (dataout && slaven)?1'b0:1'b1;
 assign znDTACK  = dtack?1'b0:1'bZ;
@@ -328,14 +332,15 @@ reg z3_confdone = 0;
 // zorro synchronizers
 // (inspired by https://github.com/endofexclusive/greta/blob/master/hdl/bus_interface/bus_interface.vhdl)
 
-reg [4:0] znAS_sync  = 5'b11111;
+reg [3:0] znAS_sync  = 3'b111;
+reg [3:0] znUDS_sync = 3'b000;
+reg [3:0] znLDS_sync = 3'b000;
+reg [3:0] zREAD_sync = 3'b000;
+
 reg [2:0] znFCS_sync = 3'b111;
-reg [2:0] znUDS_sync = 3'b000;
-reg [2:0] znLDS_sync = 3'b000;
 reg [2:0] znDS1_sync = 3'b000;
 reg [2:0] znDS0_sync = 3'b000;
-reg [1:0] znRST_sync = 3'b111;
-reg [4:0] zREAD_sync = 5'b00000;
+reg [1:0] znRST_sync = 2'b11;
 reg [1:0] zDOE_sync = 2'b00;
 reg [1:0] zE7M_sync = 2'b00;
 reg [2:0] znCFGIN_sync = 3'b000;
@@ -447,34 +452,33 @@ reg [18:0] capture_rgbavg = 0;*/
 parameter RESET = 0;
 parameter Z2_CONFIGURING = 1;
 parameter Z2_IDLE = 2;
-parameter WAIT_READ = 3;
-parameter WAIT_WRITE = 4;
-parameter WAIT_WRITE2 = 6;
+parameter WAIT_WRITE = 3;
+parameter WAIT_WRITE2 = 4;
+parameter WAIT_WRITE3 = 5;
+parameter WAIT_READ = 6;
 parameter WAIT_READ2 = 7;
-parameter WAIT_READ3 = 25;
+parameter WAIT_READ3 = 8;
 
-parameter CONFIGURED = 8;
-parameter PAUSE = 9;
+parameter CONFIGURED = 9;
+parameter PAUSE = 10;
 
-parameter Z3_IDLE = 10;
-parameter Z3_WRITE_UPPER = 11;
-parameter Z3_WRITE_LOWER = 12;
-parameter Z3_READ_UPPER = 13;
-parameter Z3_READ_LOWER = 14;
-parameter Z3_READ_DELAY = 15;
-parameter Z3_ENDCYCLE = 16;
-parameter Z3_DTACK = 17;
-parameter Z3_CONFIGURING = 18;
+parameter Z3_IDLE = 11;
+parameter Z3_WRITE_UPPER = 12;
+parameter Z3_WRITE_LOWER = 13;
+parameter Z3_READ_UPPER = 14;
+parameter Z3_READ_LOWER = 15;
+parameter Z3_READ_DELAY = 16;
+parameter Z3_ENDCYCLE = 17;
+parameter Z3_DTACK = 18;
+parameter Z3_CONFIGURING = 19;
 
-parameter WAIT_REGWRITE = 19;
-parameter REGWRITE = 20;
-parameter REGREAD = 21;
-parameter REGREAD_POST = 24;
+parameter WAIT_REGWRITE = 20;
+parameter REGWRITE = 21;
+parameter REGREAD = 22;
+parameter REGREAD_POST = 23;
 
-parameter RESET_DVID = 22;
-parameter Z2_WARMUP = 23;
-parameter Z2_PRE_CONFIGURED = 26;
-parameter Z2_PRE_CONFIGURED2 = 27;
+parameter RESET_DVID = 24;
+parameter Z2_PRE_CONFIGURED = 25;
 
 reg [6:0] zorro_state = RESET;
 reg zorro_read = 0;
@@ -493,7 +497,7 @@ reg z3addr_in_reg = 0;
 reg z3addr_autoconfig = 0;
 
 reg [15:0] zaddr_regpart = 0;
-//reg [15:0] z3addr_rom = 0;
+`define ANALYZER 1
 
 `ifdef ANALYZER
 // logic analyzer
@@ -513,40 +517,52 @@ reg [3:0] rec_zaddr [0:255];
 
 reg row_fetched = 0;
 
+reg z2_uds = 0;
+reg z2_lds = 0;
+
+reg z3_din_latch = 0;
+
 always @(posedge z_sample_clk) begin
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
   znLDS_sync  <= {znLDS_sync[1:0],znLDS};
+  znAS_sync   <= {znAS_sync[1:0],znAS};
+  zREAD_sync  <= {zREAD_sync[1:0],zREAD};
+  
   znDS1_sync  <= {znDS1_sync[1:0],znDS1};
   znDS0_sync  <= {znDS0_sync[1:0],znDS0};
-  znAS_sync   <= {znAS_sync[3:0],znAS};
-  zREAD_sync  <= {zREAD_sync[3:0],zREAD};
   zDOE_sync   <= {zDOE_sync[0],zDOE};
   zE7M_sync   <= {zE7M_sync[0],zE7M};
   znRST_sync  <= {znRST_sync[0],znRST};
   znCFGIN_sync  <= {znCFGIN_sync[1:0],znCFGIN};
   znFCS_sync <= {znFCS_sync[1:0],znFCS};
   
-  z2_addr_valid <= (znAS_sync == 5'b00000);
+  z2_addr_valid <= (znAS_sync==0); //(znAS_sync[0] == 0);
   
   data_in <= zD;
   data_in_z3_low16 <= zA[22:7]; // FIXME why sample this twice?
   zdata_in_sync <= data_in;
   
-  zorro_read  <= (zREAD_sync[2:0]==3'b111)?1'b1:1'b0; //(zREAD_sync[1] & zREAD_sync[0]);
-  zorro_write <= (zREAD_sync[1:0]==2'b00)?1'b1:1'b0; //(!zREAD_sync[1] & !zREAD_sync[0]);
+  zorro_read  <= (zREAD_sync == 3'b111);//(zREAD_sync[2:0]==3'b111)?1'b1:1'b0;
+  zorro_write <= (zREAD_sync[0] == 0);//(zREAD_sync[1:0]==2'b00)?1'b1:1'b0;
   
-  if (znUDS_sync[1]==0 || znLDS_sync[1]==0 || znDS1_sync[1]==0 || znDS0_sync[1]==0) begin
+  z_ready_latch <= z_ready; // timing fix
+  vga_clk_sel0_latch <= vga_clk_sel[0];
+  
+  if (znUDS_sync==3'b000 || znLDS_sync==3'b000 || znDS1_sync==3'b000 || znDS0_sync==3'b000)
+    z3_din_latch <= 1;
+  else
+    z3_din_latch <= 0;
+  
+  if (z3_din_latch) begin
     z3_din_high_s2 <= zD;
     z3_din_low_s2  <= zA[22:7];
   end
   
-  //if (znAS_sync[1]==1 && znAS_sync[0]==0) begin
   zaddr <= {zA[22:0],1'b0};
-  //end
   zaddr_sync  <= zaddr;
   zaddr_sync2 <= zaddr_sync;
   
-  z2_mapped_addr <= ((zaddr_sync-ram_low)>>1);
+  z2_mapped_addr <= ((zaddr_sync2-ram_low)>>1);
   
   z3addr2 <= {zD[15:8],zA[22:1],2'b00};
     
@@ -556,19 +572,17 @@ always @(posedge z_sample_clk) begin
   end
   z3_mapped_addr <= ((z3addr)&'h01ffffff)>>1;
   
-  datastrobe_synced <= ((znUDS_sync[2]==znUDS_sync[1]) && (znLDS_sync[2]==znLDS_sync[1]) 
-                        && ((znUDS_sync[2]==0) || (znLDS_sync[2]==0)))?1'b1:1'b0;
+  datastrobe_synced <= (znUDS_sync==0 || znLDS_sync==0);
+  z2_uds <= (znUDS_sync==0);
+  z2_lds <= (znLDS_sync==0);
   
-  // zaddr_sync==zaddr && 
-  // zaddr_sync==zaddr_sync2 && 
-  zaddr_in_ram <= (zaddr_sync==zaddr_sync2 && zaddr_sync2>=ram_low && zaddr_sync2<ram_high);
-  zaddr_in_reg <= (zaddr_sync==zaddr_sync2 && zaddr_sync2>=reg_low && zaddr_sync2<reg_high);
-  if (znAS_sync[1]==0 && zaddr_sync2>=autoconf_low && zaddr_sync2<autoconf_high)
+  zaddr_in_ram <= (zaddr_sync==zaddr_sync2 && zaddr_sync>=ram_low && zaddr_sync<ram_high);
+  zaddr_in_reg <= (zaddr_sync==zaddr_sync2 && zaddr_sync>=reg_low && zaddr_sync<reg_high);
+  if (znAS_sync[1]==0 && zaddr_sync>=autoconf_low && zaddr_sync<autoconf_high)
     zaddr_autoconfig <= 1'b1;
   else
     zaddr_autoconfig <= 1'b0;
-    
-  //z3addr_rom <= z3addr[15:0];
+  
   z_reset <= (znRST_sync==3'b000);
   z_cfgin <= (znCFGIN_sync==3'b000);
   z_cfgin_lo <= (znCFGIN_sync==3'b111);
@@ -590,21 +604,22 @@ reg [23:0] zorro_ram_write_addr;
 reg [15:0] zorro_ram_write_data;
 reg [1:0] zorro_ram_write_bytes;
 
-reg [4:0] ram_arbiter_state = 0;
+reg [15:0] ram_arbiter_state = 0;
 
 parameter RAM_READY = 0;
 parameter RAM_READY2 = 1;
 parameter RAM_FETCHING_ROW8 = 2;
 parameter RAM_ROW_FETCHED = 4;
-parameter RAM_READING_ZORRO_PRE = 5;
-parameter RAM_WRITING_ZORRO = 6;
-parameter RAM_BURST_OFF = 7;
-parameter RAM_BURST_ON = 8;
-parameter RAM_READING_BLIT = 9;
-parameter RAM_REFRESH = 10;
-parameter RAM_READING_ZORRO = 11;
-parameter RAM_REFRESH_PRE = 12;
-parameter RAM_WRITING_ZORRO_PRE = 13;
+parameter RAM_READING_ZORRO_PRE = 8;
+parameter RAM_WRITING_ZORRO = 16;
+parameter RAM_BURST_OFF = 32;
+parameter RAM_BURST_OFF2 = 64;
+parameter RAM_BURST_ON = 128;
+parameter RAM_READING_BLIT = 256;
+parameter RAM_REFRESH = 512;
+parameter RAM_READING_ZORRO = 1024;
+parameter RAM_REFRESH_PRE = 2048;
+parameter RAM_WRITING_ZORRO_PRE = 4096;
 
 reg [11:0] need_row_fetch_y = 0;
 reg [11:0] fetch_line_y = 0;
@@ -621,27 +636,41 @@ reg z2_addr_valid = 0;
 // =================================================================================
 // ZORRO MACHINE
 
+reg [15:0] stat_w1 = 0;
+reg [15:0] stat_w2 = 0;
+reg [15:0] stat_w3 = 0;
+reg [15:0] stat_w4 = 0;
+reg [15:0] stat_r1 = 0;
+reg [7:0] write_counter = 0;
+
+reg [1:0] zorro_write_capture_bytes = 0;
+reg [15:0] zorro_write_capture_data = 0;
+
+reg [7:0] cooldown = 0;
+
 always @(posedge z_sample_clk) begin
-      
-  /*if (rec_enable) begin
+
+`ifdef ANALYZER
+  if (rec_enable) begin
     if (rec_idx==1023) begin
       rec_enable <= 0;
       rec_idx <= 0;
     end else begin
       rec_idx <= rec_idx+1;
-      rec_zreadraw[rec_idx>>2] <= zREAD;
+      rec_zreadraw[rec_idx>>2] <= !znAS_sync[0]; // zREAD;
       rec_zread[rec_idx>>2] <= zorro_read;
       rec_zwrite[rec_idx>>2] <= zorro_write;
-      rec_zas0[rec_idx>>2] <= znAS_sync[0];
-      rec_zas1[rec_idx>>2] <= znAS_sync[1];
-      rec_zaddr_in_ram[rec_idx>>2] <= zaddr_in_ram;
-      rec_state[rec_idx>>2] <= ((zorro_state==WAIT_READ3)||(zorro_state==WAIT_READ2)||(zorro_state==WAIT_READ))?1'b1:1'b0;
+      rec_zas0[rec_idx>>2] <= !znLDS_sync[0]; //znAS_sync[0];
+      rec_zas1[rec_idx>>2] <= !znUDS_sync[0]; //znAS_sync[1];
+      rec_zaddr_in_ram[rec_idx>>2] <= zaddr[2]; //zaddr_in_ram;
+      rec_state[rec_idx>>2] <= zorro_ram_write_request; //((zorro_state==WAIT_READ3)||(zorro_state==WAIT_READ2)||(zorro_state==WAIT_READ))?1'b1:1'b0;
       rec_statew[rec_idx>>2] <= ((zorro_state==WAIT_WRITE2)||(zorro_state==WAIT_WRITE))?1'b1:1'b0;
       rec_ready[rec_idx>>2] <= z_ready;
       ///rec_zaddr[rec_idx] <= zaddr;
     end
-  end*/
-  
+  end
+`endif
+
   if (z_cfgin_lo || z_reset) begin
     zorro_state <= RESET;
   end else
@@ -684,7 +713,7 @@ always @(posedge z_sample_clk) begin
       reg_low   <= 'h600000 + ram_size;
       reg_high  <= 'h600000 + ram_size + reg_size;
       
-      if (clock_locked && znRST_sync[1] == 1'b1)
+      if (clock_locked /*&& znRST_sync[1] == 1'b1*/)
         zorro_state <= PAUSE;
     end
     
@@ -693,10 +722,10 @@ always @(posedge z_sample_clk) begin
       if (zaddr_autoconfig) begin
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end else if (z3addr_autoconfig) begin
+      end /*else if (z3addr_autoconfig) begin
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
-      end
+      end*/ // CHECK CHECK
     end
     
     Z3_CONFIGURING: begin
@@ -745,7 +774,7 @@ always @(posedge z_sample_clk) begin
         end else begin
           // write to autoconfig register
           slaven <= 1;
-          if (((znUDS_sync[2]==0) || (znLDS_sync[2]==0))) begin
+          if (z2_uds || z2_lds) begin
             dtack_time <= 0;
             zorro_state <= Z3_DTACK;
             casex (z3addr[15:0])
@@ -795,7 +824,7 @@ always @(posedge z_sample_clk) begin
     
     Z2_CONFIGURING: begin
       // CHECK
-      if (zaddr_autoconfig && !znCFGIN_sync[2]) begin
+      if (zaddr_autoconfig && z_cfgin) begin
         if (zorro_read) begin
           // read iospace 'he80000 (Autoconfig ROM)
           dataout_enable <= 1;
@@ -906,15 +935,18 @@ always @(posedge z_sample_clk) begin
         zorro_state <= RESET_DVID;
       end else
       if (z2_addr_valid) begin
-        if (zorro_read && zaddr_in_ram) begin
-          /*if (!rec_enable) begin 
+      
+        `ifdef ANALYZER
+          if (!rec_enable && zaddr_in_ram) begin 
             rec_enable <= 1;
             rec_idx <= 0;
-          end*/
-          
+          end
+        `endif
+      
+        if (zorro_read && zaddr_in_ram) begin
           // read RAM
           // request ram access from arbiter
-          last_addr <= ((zaddr_sync2-ram_low)>>1);
+          last_addr <= z2_mapped_addr;
           data <= 'hffff;
           read_counter <= 0;
           
@@ -923,11 +955,15 @@ always @(posedge z_sample_clk) begin
           dataout <= 1;
           
           zorro_state <= WAIT_READ3;
+          z_ready <= 0;
+          
+          //stat_r1 <= stat_r1+1'b1;
           
         end else if (zorro_write && zaddr_in_ram) begin
-          // write RAM          
-          last_addr <= ((zaddr_sync2-ram_low)>>1); // z2_mapped_addr
+          // write RAM
+          last_addr <= z2_mapped_addr;
           zorro_state <= WAIT_WRITE;
+          z_ready <= 0;
           
         end else if (zorro_write && zaddr_in_reg) begin
           // write to register
@@ -950,7 +986,7 @@ always @(posedge z_sample_clk) begin
             'h28: data <= blitter_rgb;
             'h2a: data <= blitter_enable;
             
-            'h60: data <= {sd_busy,8'h00};
+            /*'h60: data <= {sd_busy,8'h00};
             'h62: data <= {sd_read,8'h00};
             'h64: data <= {sd_write,8'h00};
             'h66: data <= {sd_handshake_out,8'h00};
@@ -958,18 +994,30 @@ always @(posedge z_sample_clk) begin
             'h6a: data <= sd_addr_in[15:0];
             'h6c: data <= {sd_data_in,8'h00};
             'h6e: data <= {sd_data_out,8'h00};
-            'h70: data <= sd_error;
+            'h70: data <= sd_error;*/
             //'h72: data <= sd_clkdiv;
+            
+            'h90: data <= stat_w1;
+            'h92: data <= stat_w2;
+            'h94: data <= stat_w3;
+            'h96: data <= stat_w4;
+            'h98: data <= stat_r1;
             
             default: data <= REVISION; //'h0000;
           endcase
-        end        
+        end else begin
+          dataout <= 0;
+          dataout_enable <= 0;
+          slaven <= 0;
+          write_stall <= 0;
+        end
+          
       end else begin
         dataout <= 0;
         dataout_enable <= 0;
         slaven <= 0;
         write_stall <= 0;
-        z_ready <= 1; // clear XRDY (cpu wait)
+        //z_ready <= 1; // clear XRDY (cpu wait)
       end
     end
     
@@ -983,7 +1031,6 @@ always @(posedge z_sample_clk) begin
     
     // ----------------------------------------------------------------------------------
     WAIT_READ3: begin
-      z_ready <= 0;
       if (!zorro_ram_read_request) begin
         zorro_ram_read_addr <= last_addr;
         zorro_ram_read_request <= 1;
@@ -1004,6 +1051,7 @@ always @(posedge z_sample_clk) begin
         data <= zorro_ram_read_data;
         read_counter <= read_counter + 1;
         zorro_ram_read_request <= 0;
+        z_ready <= 1;
         
         if (read_counter >= dataout_time) begin
           zorro_state <= WAIT_READ;
@@ -1013,38 +1061,46 @@ always @(posedge z_sample_clk) begin
   
     // ----------------------------------------------------------------------------------
     WAIT_READ: begin
-      //data <= zorro_ram_read_data;
-      z_ready <= 1;
-      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
+      data <= zorro_ram_read_data;
+      if (!z2_addr_valid) begin
         zorro_state <= Z2_IDLE;
       end
     end
    
     // ----------------------------------------------------------------------------------
-    WAIT_WRITE:
+    WAIT_WRITE: begin
       if (!zorro_ram_write_request) begin
         z_ready <= 1;
-        write_stall <= 0;
-        if (datastrobe_synced) begin // && zdata_in_sync==data_in
-          zorro_ram_write_addr <= last_addr;
-          zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]};
-          zorro_ram_write_data <= zdata_in_sync;
-          zorro_ram_write_request <= 1;
-          
+        if (datastrobe_synced) begin
+          zorro_write_capture_bytes <= {z2_uds,z2_lds};
+          zorro_write_capture_data <= zdata_in_sync;
           zorro_state <= WAIT_WRITE2;
         end
-      end else begin
-        z_ready <= 0;
-        write_stall <= 1;
-      end
-    
-    // ----------------------------------------------------------------------------------
-    WAIT_WRITE2: begin
-      z_ready <= 1;
-      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        zorro_state <= Z2_IDLE;
       end
     end
+    
+    WAIT_WRITE2: begin
+      zorro_ram_write_addr <= last_addr;
+      zorro_ram_write_bytes <= zorro_write_capture_bytes;
+      zorro_ram_write_data <= zorro_write_capture_data;
+      zorro_ram_write_request <= 1;
+      zorro_state <= WAIT_WRITE3;
+      
+      stat_w1 <= stat_w1 + zorro_write_capture_bytes[1];
+      stat_w2 <= stat_w2 + zorro_write_capture_bytes[0];
+      /*stat_w3 <= stat_w3 + zorro_write_capture_data;
+      stat_w4 <= stat_w4 + last_addr[0];*/
+    end
+      
+    WAIT_WRITE3: begin
+      //if (!z2_addr_valid) begin
+      if (!zorro_write) begin
+        zorro_state <= Z2_IDLE;
+      end
+      //end
+    end
+    
+    // ----------------------------------------------------------------------------------
     
     RESET_DVID: begin
       if (dvid_reset_counter==0) begin
@@ -1264,6 +1320,14 @@ always @(posedge z_sample_clk) begin
         end
         'h82: refresh_time <= regdata_in[15:0];
         
+        'h90: begin
+          stat_w1 <= 0;
+          stat_w2 <= 0;
+          stat_w3 <= 0;
+          stat_w4 <= 0;
+          stat_r1 <= 0;
+        end
+        
         'h70: h_sync_start <= regdata_in[11:0];
         'h72: h_sync_end <= regdata_in[11:0];
         'h74: h_max <= regdata_in[11:0];
@@ -1275,7 +1339,7 @@ always @(posedge z_sample_clk) begin
           dvid_reset <= 1;
         end
         
-        //'h0a: dataout_time <= regdata_in[7:0];
+        'h0a: dataout_time <= regdata_in[7:0];
         'h0c: margin_x <= regdata_in[9:0];
         'h10: preheat_x <= regdata_in[4:0];
         //'h12: safe_x1 <= regdata_in[10:0];
@@ -1342,7 +1406,7 @@ always @(posedge z_sample_clk) begin
         'h6a: sd_addr_in[15:0] <= regdata_in[15:0];
         'h6c: sd_data_in <= regdata_in[15:8];
         
-        'h80: ram_arbiter_state <= regdata_in[4:0];
+        //'h80: ram_arbiter_state <= regdata_in[4:0];
       endcase
     end
     
@@ -1357,48 +1421,48 @@ always @(posedge z_sample_clk) begin
 
   case (ram_arbiter_state)
     RAM_READY: begin
-      ram_enable <= 1;
-      //ram_write <= 0;
+      ram_enable <= 0;
       ram_arbiter_state <= RAM_READY2;
       fetch_y <= pan_ptr + (fetch_line_y << row_pitch_shift);
     end
     
     RAM_READY2: begin
-      // start fetching a row
-      ram_addr  <= fetch_y+glitchx2_reg;
-      ram_write <= 0;
-      ram_byte_enable <= 'b11;
-      //ram_enable <= 1;
-      fetch_x <= 0;
-      fetch_x2 <= glitchx2_reg;
-      
       if (row_fetched) begin
+        ram_enable <= 0;
         ram_burst <= 0;
-        ram_arbiter_state <= RAM_BURST_OFF;
+        if (data_out_queue_empty)
+          ram_arbiter_state <= RAM_BURST_OFF;
       end else begin
+        // start fetching a row
+        ram_enable <= 0;
         ram_burst <= 1;
         ram_arbiter_state <= RAM_BURST_ON;
+        
+        fetch_x <= 0;
+        fetch_x2 <= glitchx2_reg;
       end
     end
     
     RAM_BURST_ON: begin
-      //ram_enable <= 1;
-      //ram_write <= 0;
-      if (cmd_ready) ram_arbiter_state <= RAM_FETCHING_ROW8;
-    end
-    
-    RAM_FETCHING_ROW8: begin
-      //ram_enable <= 1;
-      //ram_write <= 0;
-      if ((fetch_x >= (screen_w + margin_x))) begin
-        row_fetched <= 1; // row completely fetched
-        ram_burst <= 0;
-        ram_arbiter_state <= RAM_READY;
+      if (cmd_ready) begin
+        ram_arbiter_state <= RAM_FETCHING_ROW8;
         
-      end else if (data_out_ready) begin
+        ram_addr  <= fetch_y+glitchx2_reg;
+        ram_write <= 0;
+        ram_byte_enable <= 'b11;
         ram_enable <= 1;
         ram_write <= 0;
         ram_byte_enable <= 'b11;
+      end
+    end
+    
+    RAM_FETCHING_ROW8: begin
+      if ((fetch_x >= (screen_w + margin_x))) begin
+        row_fetched <= 1; // row completely fetched
+        ram_enable <= 0;
+        ram_arbiter_state <= RAM_READY;
+        
+      end else if (data_out_ready) begin
         ram_addr  <= ram_addr + 1'b1; // burst incremented
       
         fetch_x <= fetch_x + 1'b1;
@@ -1409,19 +1473,37 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_BURST_OFF: begin
+      // this solves the problem of first write/read lost
+      // after burst disable
+      if (cmd_ready) begin
+        ram_enable <= 1;
+        ram_write <= 0;
+        //ram_addr <= 0;
+              
+        ram_addr <= refresh_addr;
+        refresh_addr <= refresh_addr + 512;
+        
+        ram_arbiter_state <= RAM_BURST_OFF2;
+      end
+    end
+    
+    RAM_BURST_OFF2: begin
       ram_enable <= 0;
-      if (data_out_queue_empty && cmd_ready)
+      if (data_out_ready) begin
         ram_arbiter_state <= RAM_ROW_FETCHED;
+      end
     end
     
     RAM_ROW_FETCHED:
-      if ((need_row_fetch_y!=fetch_line_y) && (x_safe_area)) begin
+      if ((need_row_fetch_y!=fetch_line_y) && (x_safe_area) && cmd_ready) begin
         row_fetched <= 0;
         fetch_x <= 0;
         fetch_line_y <= need_row_fetch_y;
         //linescalecount <= 0;
         ram_arbiter_state <= RAM_READY;
       end else if (x_safe_area) begin
+        //if (refresh_counter>refresh_time && cmd_ready)
+        //  ram_arbiter_state <= RAM_REFRESH_PRE;
         // do nothing if not in safe area
         
       // BLITTER ----------------------------------------------------------------
@@ -1506,38 +1588,32 @@ always @(posedge z_sample_clk) begin
       end else if (/*blitter_enable==0 &&*/ zorro_ram_read_request && cmd_ready) begin
         // process read request
         zorro_ram_read_done <= 0;
-        if (data_out_queue_empty) begin
+        ram_enable <= 0;
+        if (data_out_queue_empty)
           ram_arbiter_state <= RAM_READING_ZORRO_PRE;
-        end else 
-          ram_enable <= 0;
       end else if (/*blitter_enable==0 &&*/ zorro_ram_write_request && cmd_ready) begin
         // process write request
         ram_arbiter_state <= RAM_WRITING_ZORRO_PRE;
-      end else if (/*blitter_enable==0 &&*/ refresh_counter>refresh_time && !zorro_ram_read_request && !zorro_ram_write_request && cmd_ready) begin
-        ram_arbiter_state <= RAM_REFRESH_PRE;
+      //end else if (refresh_counter>refresh_time && cmd_ready) begin
+      //  ram_arbiter_state <= RAM_REFRESH_PRE;
       /*end else if (blitter_enable) begin
         blitter_enable <= 0;*/
       end else
         refresh_counter <= refresh_counter + 1;
     
     RAM_REFRESH_PRE: begin
-      if (data_out_queue_empty) begin
-        ram_write <= 0;
-        ram_addr <= refresh_addr;
-        ram_byte_enable <= 'b11;
-        refresh_addr <= refresh_addr + 512;
-        ram_enable <= 1;
-        ram_arbiter_state <= RAM_REFRESH;
-        refresh_counter <= 0;
-      end else 
-        ram_enable <= 0;
+      ram_enable <= 1;
+      ram_write <= 0;
+      ram_byte_enable <= 'b11;
+      ram_addr <= refresh_addr;
+      refresh_addr <= refresh_addr + 512;
+      ram_arbiter_state <= RAM_REFRESH;
+      refresh_counter <= 0;
     end
     
     RAM_REFRESH: begin
-      if (data_out_ready) begin
-        ram_enable <= 0;
-        ram_arbiter_state <= RAM_ROW_FETCHED;
-      end
+      ram_enable <= 0;
+      ram_arbiter_state <= RAM_BURST_OFF;
     end
     
     RAM_READING_BLIT: begin
@@ -1561,38 +1637,43 @@ always @(posedge z_sample_clk) begin
     RAM_READING_ZORRO: begin
       if (data_out_ready) begin
         ram_enable <= 0;
+        stat_r1 <= ram_data_out;
         zorro_ram_read_data <= ram_data_out;
         zorro_ram_read_done <= 1;
         zorro_ram_read_request <= 0;
         ram_arbiter_state <= RAM_ROW_FETCHED;
-      end/* else begin // FIXME
+      end
+      /* else begin // FIXME
         ram_enable <= 1;
         ram_write <= 0;
       end*/
     end
     
     RAM_WRITING_ZORRO_PRE: begin
-      if (zorro_ram_write_bytes[1] && !zorro_ram_write_bytes[0])
-        ram_byte_enable <= 'b10; // UDS
-      else if (zorro_ram_write_bytes[0] && !zorro_ram_write_bytes[1])
-        ram_byte_enable <= 'b01; // LDS
-      else
-        ram_byte_enable <= 'b11;
+      if (cmd_ready) begin
+        /*stat_w1 <= stat_w1+zorro_ram_write_bytes[0];
+        stat_w2 <= stat_w2+zorro_ram_write_bytes[1];
+        stat_w3 <= stat_w3+zorro_ram_write_addr[7:0];
+        stat_w4 <= stat_w4+zorro_ram_write_data[7:0];*/
       
-      ram_data_in <= zorro_ram_write_data;
-      ram_addr    <= zorro_ram_write_addr;
-      ram_write   <= 1;
-      ram_enable  <= 1;
-      
-      ram_arbiter_state <= RAM_WRITING_ZORRO;
+        ram_byte_enable <= zorro_ram_write_bytes;
+        ram_data_in <= zorro_ram_write_data;
+        ram_addr    <= zorro_ram_write_addr;
+        ram_write   <= 1;
+        ram_enable  <= 1;
+        
+        ram_arbiter_state <= RAM_WRITING_ZORRO;
+      end
     end
     
     RAM_WRITING_ZORRO: begin
-      zorro_ram_write_done <= 1;
-      zorro_ram_write_request <= 0;
-        
-      ram_enable <= 0;
-      ram_arbiter_state <= RAM_ROW_FETCHED;
+      if (cmd_ready) begin
+        zorro_ram_write_done <= 1;
+        zorro_ram_write_request <= 0;
+        ram_enable <= 0;
+        ram_write <= 0;
+        ram_arbiter_state <= RAM_ROW_FETCHED;
+      end
     end
     
     default:
@@ -1616,6 +1697,7 @@ reg [4:0] preheat_x = 0;
 reg preheat = 0;
 
 reg x_safe_area = 0;
+reg display_pixels = 0;
 
 always @(posedge vga_clk) begin
   if (counter_x >= h_max-preheat_x && !preheat) begin
@@ -1667,12 +1749,18 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
   end
   
-  if (!preheat && (dvi_blank || (counter_x>=h_rez) || (counter_y>=screen_h))) begin
+  if (!preheat && (dvi_blank || (counter_x>=h_rez-1) || (counter_y>=screen_h-1)))
+    display_pixels <= 0;
+  else
+    display_pixels <= 1;
+  
+  if (!display_pixels) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;
-  /*end else if (counter_y>=590) begin
-    if (counter_x<110) begin
+`ifdef ANALYZER
+  end else if (counter_y>=590) begin
+    /*if (counter_x<110) begin
       if (zorro_state[4]) green_p <= 8'hff;
       else green_p <= 8'h20;
     end else if (counter_x<120) begin
@@ -1725,7 +1813,7 @@ always @(posedge vga_clk) begin
       blue_p <= 0;
     end*/
     
-    /*if (counter_y<600) begin
+    if (counter_y<600) begin
       if (rec_zreadraw[counter_x]) green_p <= 8'hff;
       else green_p <= 0;
     end else if (counter_y<610) begin
@@ -1755,7 +1843,8 @@ always @(posedge vga_clk) begin
     end else begin
       green_p <= 0;
       blue_p <= 0;
-    end*/
+    end
+`endif
     
   end else if (colormode==0) begin
     // 0: +0a +0b +1a

@@ -254,9 +254,9 @@ always @(posedge clk)
       end
       
       // empty read queue if switched off
-      if (cmd_enable == 0) begin
-        data_ready_delay <= 0;
-      end
+      //if (cmd_enable == 0) begin
+      //  data_ready_delay <= 0;
+      //end
 
       if (data_ready_delay[0] == 1'b1) begin
         data_out_reg       <= captured_data;
@@ -297,7 +297,7 @@ always @(posedge clk)
                iob_cke <= 1'b1;
                
                // All the commands during the startup are NOPS, except these
-               if(startup_refresh_count == startup_refresh_max-31) begin
+               /*if(startup_refresh_count == startup_refresh_max-31) begin
                   // ensure all rows are closed
                   iob_command     <= CMD_PRECHARGE;
                   iob_address[prefresh_cmd] <= 1'b1;  // all banks
@@ -308,11 +308,11 @@ always @(posedge clk)
                   iob_command     <= CMD_REFRESH;
                end else if (startup_refresh_count == startup_refresh_max-15) 
                   iob_command     <= CMD_REFRESH;
-               else if (startup_refresh_count == startup_refresh_max-7) begin
+               else*/ //if (startup_refresh_count == startup_refresh_max-7) begin
                   // Now load the mode register
                   iob_command     <= CMD_LOAD_MODE_REG;
                   iob_address     <= MODE_REG;
-               end
+               //end
 
                if (startup_refresh_count == 1'b0) begin
                   state           <= s_idle;
@@ -353,6 +353,7 @@ always @(posedge clk)
               iob_command     <= CMD_NOP;
               iob_address     <= 13'b0000000000000;
               iob_bank        <= 2'b00;
+              ready_for_new   <= 1'b1;
            end
          end
          
@@ -513,7 +514,7 @@ always @(posedge clk)
          default: begin 
                state                 <= s_startup;
                ready_for_new         <= 1'b0;
-               startup_refresh_count <= startup_refresh_max-sdram_startup_cycles;
+               //startup_refresh_count <= startup_refresh_max-sdram_startup_cycles;
             end
          endcase
 
