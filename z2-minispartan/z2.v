@@ -276,7 +276,7 @@ reg [11:0] screen_w = 1280;
 reg [11:0] screen_h = 720;
 
 // zorro port buffers / flags
-reg ZORRO3 = 0; // CHECK CHECK 1;
+reg ZORRO3 = 1; 
 reg [23:0] zaddr; // zorro 2 address
 reg [31:0] zaddr_sync;
 reg [31:0] zaddr_sync2;
@@ -726,10 +726,10 @@ always @(posedge z_sample_clk) begin
       if (zaddr_autoconfig) begin
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end /*else if (z3addr_autoconfig) begin
+      end else if (z3addr_autoconfig) begin
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
-      end*/ // CHECK CHECK
+      end
     end
     
     Z3_CONFIGURING: begin
@@ -961,13 +961,11 @@ always @(posedge z_sample_clk) begin
           z_ovr <= 1;
           
           zorro_state <= WAIT_READ3;
-          //z_ready <= 0; // CHECK
           
         end else if (zorro_write && zaddr_in_ram) begin
           // write RAM
           last_addr <= z2_mapped_addr;
           zorro_state <= WAIT_WRITE;
-          //z_ready <= 0;
           dataout_enable <= 0;
           dataout <= 0;
           datain_counter <= 0;
@@ -1031,7 +1029,6 @@ always @(posedge z_sample_clk) begin
         dataout_enable <= 0;
         slaven <= 0;
         write_stall <= 0;
-        //z_ready <= 1; // clear XRDY (cpu wait)
       end
     end
     
@@ -1045,7 +1042,6 @@ always @(posedge z_sample_clk) begin
     
     // ----------------------------------------------------------------------------------
     WAIT_READ3: begin
-      //z_ready <= 0;
       if (!zorro_ram_write_request) begin
         zorro_ram_read_addr <= last_addr;
         zorro_ram_read_request <= 1;
@@ -1055,61 +1051,17 @@ always @(posedge z_sample_clk) begin
     end
     
     WAIT_READ2: begin
-      /*if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        // ram too slow TODO: report this
-        zorro_ram_read_request <= 0;
-        zorro_state <= Z2_IDLE;
-        z_ready <= 1;
-      end else */
-      
       if (zorro_ram_read_done) begin
-        //data[7:0] <= zorro_ram_read_data[7:0];
         read_counter <= read_counter + 1;
         zorro_ram_read_request <= 0;
         data <= zorro_ram_read_data;
-        //z_ready <= 1;
         
         if (read_counter >= dataout_time) begin
-          zorro_state <= Z2_ENDCYCLE; //WAIT_READ;
+          zorro_state <= Z2_ENDCYCLE;
         end
       end
     end
   
-    // ----------------------------------------------------------------------------------
-    /*WAIT_READ: begin
-      z_ready <= 1;
-      //data <= zorro_ram_read_data;
-      
-      if (znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        zorro_state <= Z2_IDLE;
-        dataout_enable <= 0;
-        dataout <= 0;
-      end
-    end*/
-   
-    // ----------------------------------------------------------------------------------
-    /*WAIT_WRITE:
-      if (!zorro_ram_write_request) begin
-        z_ready <= 1;
-        write_stall <= 0;
-        if (datastrobe_synced) begin // && zdata_in_sync==data_in
-          zorro_ram_write_addr <= last_addr;
-          zorro_ram_write_bytes <= {~znUDS_sync[2],~znLDS_sync[2]}; // {z2_uds,z2_lds}; <- this makes noise
-          zorro_ram_write_data <= zdata_in_sync;
-          zorro_ram_write_request <= 1;
-          
-          zorro_state <= WAIT_WRITE2;
-        end
-      end else begin
-        z_ready <= 0;
-        write_stall <= 1;
-      end
-    
-    WAIT_WRITE2: begin
-      if (!z2_addr_valid) begin //(znAS_sync[1]==1 && znAS_sync[0]==1) begin
-        zorro_state <= Z2_IDLE;
-      end
-    end*/
     WAIT_WRITE: begin
       if (!zorro_ram_write_request) begin
         if (datastrobe_synced) begin
@@ -1132,12 +1084,6 @@ always @(posedge z_sample_clk) begin
       stat_w3 <= stat_w3 + zorro_write_capture_data;
       stat_w4 <= stat_w4 + last_addr[0];*/
     end
-      
-    /*WAIT_WRITE3: begin
-      if (!z2_addr_valid)
-        zorro_state <= Z2_IDLE;
-    end
-    */
     
     Z2_ENDCYCLE: begin
       if (!z2_addr_valid) begin
@@ -1309,8 +1255,6 @@ always @(posedge z_sample_clk) begin
       zorro_state <= REGREAD_POST;
       
       case (zaddr_regpart)
-        /*'h00: begin z3_regread_hi <= REVISION;
-              z3_regread_lo <= 0; end*/
         'h20: begin z3_regread_hi <= blitter_x1;
               z3_regread_lo <= blitter_y1; end // 'h22
               
@@ -1369,7 +1313,6 @@ always @(posedge z_sample_clk) begin
           screen_h <= regdata_in[11:0];
           v_rez    <= regdata_in[11:0];
         end
-        //'h82: refresh_time <= regdata_in[15:0];
         
         'h90: begin
           stat_w1 <= 0;
@@ -1555,8 +1498,6 @@ always @(posedge z_sample_clk) begin
         //linescalecount <= 0;
         ram_arbiter_state <= RAM_READY;
       end else if (x_safe_area) begin
-        //if (refresh_counter>refresh_time && cmd_ready)
-        //  ram_arbiter_state <= RAM_REFRESH_PRE;
         // do nothing if not in safe area
         
       // BLITTER ----------------------------------------------------------------
@@ -1696,10 +1637,6 @@ always @(posedge z_sample_clk) begin
         zorro_ram_read_request <= 0;
         ram_arbiter_state <= RAM_ROW_FETCHED;
       end
-      /* else begin // FIXME
-        ram_enable <= 1;
-        ram_write <= 0;
-      end*/
     end
     
     RAM_WRITING_ZORRO_PRE: begin
@@ -1778,7 +1715,7 @@ always @(posedge vga_clk) begin
     counter_x <= counter_x + 1'b1;
     display_x <= display_x + 1'b1;
   
-    if (counter_x==h_max-fetch_preroll) begin
+    if (counter_x > h_max-fetch_preroll) begin
       if (counter_y<screen_h-1'b1)
         need_row_fetch_y <= (counter_y>>scalemode)+1'b1;
       else
@@ -1802,7 +1739,7 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
   end
   
-  if (!preheat && (dvi_blank || (counter_x>=h_rez-1) || (counter_y>=screen_h-1)))
+  if (!preheat && (counter_x!=h_max) && (dvi_blank || (counter_x>=h_rez-1) || (counter_y>=screen_h-1)))
     display_pixels <= 0;
   else
     display_pixels <= 1;
@@ -1812,8 +1749,8 @@ always @(posedge vga_clk) begin
     green_p <= 0;
     blue_p  <= 0;
 `ifdef ANALYZER
-  end else if (counter_y>=590) begin
-    /*if (counter_x<110) begin
+  /*end else if (counter_y>=550) begin
+    if (counter_x<110) begin
       if (zorro_state[4]) green_p <= 8'hff;
       else green_p <= 8'h20;
     end else if (counter_x<120) begin
@@ -1866,7 +1803,7 @@ always @(posedge vga_clk) begin
       blue_p <= 0;
     end*/
     
-    if (counter_y<600) begin
+    /*if (counter_y<600) begin
       if (rec_zreadraw[counter_x]) green_p <= 8'hff;
       else green_p <= 0;
     end else if (counter_y<610) begin
@@ -1896,7 +1833,7 @@ always @(posedge vga_clk) begin
     end else begin
       green_p <= 0;
       blue_p <= 0;
-    end
+    end*/
 `endif
     
   end else if (colormode==0) begin
