@@ -1,4 +1,8 @@
-# MNT VA2000, an Amiga 2000 Graphics Card (Zorro II)
+# MNT VA2000, an Amiga 2000 Graphics Card (Zorro II/III)
+
+_Update January 16th, 2017:_ The MNT VA2000 is now a finished product (credits go to Scarab Hardware for making this happen) that you can buy. I shipped the first batch of 100 cards on christmas 2016 and the second batch is now being made. You can still grab one: http://mntshop.bigcartel.com/product/mnt-va2000-amiga-graphics-card-zorro-ii-iii-batch-2-preorder
+
+The latest firmware update and drivers are always available here: http://mntmn.com/va2000/
 
 ![MNT VA2000 Protoype 2 Populated](pics/proto2/proto2-populated2.jpg)
 
