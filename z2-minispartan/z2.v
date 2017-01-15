@@ -259,7 +259,6 @@ dvid_out dvid_out(
 // vga registers
 reg [11:0] counter_x = 0;
 reg [11:0] counter_y = 0;
-reg [11:0] display_x = 0;
 reg [11:0] display_x2 = 0;
 reg [11:0] display_x3 = 0;
 
@@ -582,6 +581,7 @@ always @(posedge z_sample_clk) begin
   
   z3addr2 <= {zD[15:8],zA[22:1],2'b00};
   
+  // CHECK
   // sample z3addr on falling edge of /FCS
   if (znFCS_sync[1]==1 && znFCS_sync[0]==0) begin
     z3addr <= z3addr2;
@@ -1362,10 +1362,10 @@ always @(posedge z_sample_clk) begin
         'h0c: margin_x <= regdata_in[9:0];
         'h10: preheat_x <= regdata_in[4:0];
         //'h12: safe_x1 <= regdata_in[10:0];
-        //'h14: safe_x2 <= regdata_in[10:0];
+        'h14: safe_x2 <= regdata_in[10:0];
         /*'h16: glitchx2_reg <= regdata_in[10:0];
         'h18: ram_burst_col <= regdata_in[8:0];*/
-        //'h1a: fetch_preroll <= regdata_in[10:0];
+        'h1a: fetch_preroll <= regdata_in[10:0];
         
         // blitter regs
         'h1c: blitter_base[23:16] <= regdata_in[7:0];
@@ -1482,7 +1482,7 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if ((fetch_x >= (screen_w + margin_x))) begin
+      if (fetch_x >= (screen_w+margin_x)) begin
         trace_8 <= trace_8+1'b1;
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
@@ -1722,22 +1722,19 @@ reg x_safe_area = 0;
 reg display_pixels = 0;
 
 always @(posedge vga_clk) begin
-  if (counter_x >= h_max-preheat_x && !preheat) begin
+  /*if (counter_x >= h_max-preheat_x && !preheat) begin
     counter_8x <= margin_x;
     counter_x_hi <= 0;
     counter_scale <= scalemode;
-    display_x <= margin_x;
-    display_x2 <= margin_x<<1'b1;
-    display_x3 <= (margin_x<<1'b1)+1'b1;
     
     preheat <= 1;
-  end
+  end*/
   
   x_safe_area <= (counter_x > h_max-safe_x2);
   
   if (counter_x >= h_max) begin
     counter_x <= 0;
-    preheat <= 0;
+    //preheat <= 0;
     
     if (counter_y >= v_max) begin
       counter_y <= 0;
@@ -1745,7 +1742,6 @@ always @(posedge vga_clk) begin
       counter_y <= counter_y + 1'b1;
   end else begin
     counter_x <= counter_x + 1'b1;
-    display_x <= display_x + 1'b1;
   
     if (counter_x > h_max-fetch_preroll) begin
       if (counter_y<screen_h-1'b1)
@@ -1771,10 +1767,17 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
   end
   
-  if (counter_y<screen_h && (counter_x>=h_max-1 || counter_x<screen_w-1))
+  if ((counter_y<screen_h || counter_y==v_max) && (counter_x>=h_max-1 || counter_x<h_rez-1))
     display_pixels <= 1;
-  else
+  else begin
     display_pixels <= 0;
+    preheat <= 0;
+    counter_8x <= margin_x;
+    counter_x_hi <= 0;
+    counter_scale <= scalemode;
+    display_x2 <= {margin_x,1'b0}; //<<1'b1;
+    display_x3 <= {margin_x,1'b1}; //) +1'b1;
+  end
   
   /*
   if (!preheat && (counter_x!=h_max) && (dvi_blank || (counter_x>=h_rez-1) || (counter_y>=screen_h-1)))
