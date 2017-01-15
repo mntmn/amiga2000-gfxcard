@@ -927,7 +927,7 @@ always @(posedge z_sample_clk) begin
       blitter_base <= 0;
       pan_ptr <= 0;
       burst_enabled <= 1;
-      margin_x <= 7;
+      margin_x <= 8;
       row_pitch <= 2048;
       row_pitch_shift <= 11;
       
@@ -1413,13 +1413,11 @@ always @(posedge z_sample_clk) begin
     
     RAM_READY2: begin
       if (row_fetched) begin
-        trace_5 <= trace_5+1'b1;
         ram_enable <= 0;
         ram_burst <= 0;
         if (data_out_queue_empty)
           ram_arbiter_state <= RAM_BURST_OFF;
       end else begin
-        trace_6 <= trace_6+1'b1;
         // start fetching a row
         ram_enable <= 0;
         ram_burst <= 1;
@@ -1432,7 +1430,6 @@ always @(posedge z_sample_clk) begin
     
     RAM_BURST_ON: begin
       if (cmd_ready) begin
-        trace_7 <= trace_7+1'b1;
         ram_arbiter_state <= RAM_FETCHING_ROW8;
         
         ram_addr  <= fetch_y+glitchx2_reg;
@@ -1446,13 +1443,11 @@ always @(posedge z_sample_clk) begin
     
     RAM_FETCHING_ROW8: begin
       if (fetch_x >= (screen_w+margin_x)) begin
-        trace_8 <= trace_8+1'b1;
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
         
       end else if (data_out_ready) begin
-        trace_9 <= trace_9+1'b1;
         ram_addr  <= ram_addr + 1'b1; // burst incremented
       
         fetch_x <= fetch_x + 1'b1;
@@ -1489,7 +1484,6 @@ always @(posedge z_sample_clk) begin
         fetch_x <= 0;
         fetch_line_y <= need_row_fetch_y_latched;
         ram_arbiter_state <= RAM_READY;
-        trace_1 <= trace_1+1'b1;
         
       end else if (x_safe_area) begin
         // do nothing if not in safe area
@@ -1683,14 +1677,14 @@ always @(posedge vga_clk) begin
       counter_y <= 0;
     end else
       counter_y <= counter_y + 1'b1;
-  end else
+  end else begin
     counter_x <= counter_x + 1'b1;
-  
-  if (counter_x > h_max-fetch_preroll)
-    if (counter_y<screen_h)
-      need_row_fetch_y <= (counter_y+1'b1)>>scalemode;
-    else
-      need_row_fetch_y <= 0;
+    if (counter_x > h_max-fetch_preroll)
+      if (counter_y<screen_h)
+        need_row_fetch_y <= (counter_y+1'b1)>>scalemode;
+      else
+        need_row_fetch_y <= 0;
+  end
   
   if (counter_x>=h_sync_start && counter_x<h_sync_end)
     dvi_hsync <= 1;
@@ -1708,7 +1702,7 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
   end
   
-  if ((counter_y<screen_h || counter_y>=v_max) && (counter_x>=h_max-1 || counter_x<h_rez))
+  if ((counter_y<screen_h || counter_y>=v_max) && (counter_x>=h_max || counter_x<h_rez))
     display_pixels <= 1;
   else begin
     display_pixels <= 0;
