@@ -153,7 +153,7 @@ use Work.common.all;
 entity SdCardCtrl is
 
   generic (
-    FREQ_G          : real       := 150.0;     -- Master clock frequency (MHz).
+    FREQ_G          : real       := 50.0;     -- Master clock frequency (MHz).
     INIT_SPI_FREQ_G : real       := 0.25;  -- Slow SPI clock freq. during initialization (MHz).
     SPI_FREQ_G      : real       := 25.0;  -- Operational SPI freq. to the SD card (MHz).
     BLOCK_SIZE_G    : natural    := 512;  -- Number of bytes in an SD card block or sector.
