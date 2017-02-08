@@ -99,7 +99,7 @@ After fighting through all of these issues and burning through a few boards, I f
 
 ![Prototype 1 Zorro Bus Analyzer 1](pics/proto1/zorro-signals2.jpg) 
 
-The first 5 longer, stretched rows in this picture are the signals DOE, READ, /UDS, /AS and E7M (Amiga 7Mhz Clock) sampled at 100 Mhz/Column, so the whole picture displays a time sample of 6400ns (nanoseconds) or 6.4ms (milliseconds).
+The first 5 longer, stretched rows in this picture are the signals DOE, READ, /UDS, /AS and E7M (Amiga 7Mhz Clock) sampled at 100 Mhz/Column, so the whole picture displays a time sample of 6400ns (nanoseconds) or 6.4&mu;s (microseconds).
 
 The following lines on the grid represent the Address bits A23-A1 in descending order. A0 does not exist; the 68000 selects an upper, lower or both bytes (word access) using /UDS and /LDS instead.
 
