@@ -52,6 +52,22 @@ output SD_SCLK,
 input SD_DAT1,
 input SD_DAT2,
 
+// Capture
+input videoHS,
+input videoVS,
+input videoR0,
+input videoR1,
+input videoR2,
+input videoR3,
+input videoG0,
+input videoG1,
+input videoG2,
+input videoG3,
+input videoB0,
+input videoB1,
+input videoB2,
+input videoB3,
+
 // SDRAM
 output SDRAM_CLK,  
 output SDRAM_CKE,  
@@ -433,28 +449,6 @@ reg [11:0] blitter_cury2 = 0;
 
 reg write_stall = 0;
 
-// video capture regs (currently disabled)
-/*reg capture_mode = 0;
-reg [13:0] capture_x = 0;
-reg [13:0] capture_y = 0;
-reg [23:0] capture_ptr = 0;
-reg [5:0] capture_subx = 0;
-reg [5:0] capture_freq = 'h0a;
-reg [7:0] capture_prex = 0;
-reg [7:0] capture_prey = 0;
-reg [7:0] capture_porch = 'h80;
-reg [9:0] capture_shift = 512;
-reg [9:0] hs_sync = 0;
-reg [9:0] vs_sync = 0;
-reg [7:0] vs_sync_count = 0;
-reg [2:0] cap_state = 0;*/
-/*reg [17:0] capture_rgb = 0;
-reg [17:0] capture_rgb1 = 0;
-reg [17:0] capture_rgb2 = 0;
-reg [17:0] capture_rgb3 = 0;
-reg [17:0] capture_rgb4 = 0;
-reg [18:0] capture_rgbavg = 0;*/
-
 // main FSM
 parameter RESET = 0;
 parameter Z2_CONFIGURING = 1;
@@ -537,8 +531,104 @@ reg z2_uds = 0;
 reg z2_lds = 0;
 
 reg z3_din_latch = 0;
-
 reg z3_fcs_state = 0;
+
+
+
+// video capture regs
+reg capture_mode = 0;
+reg [9:0] videocap_x = 0;
+reg [9:0] videocap_y = 0;
+reg [9:0] videocap_y2 = 0;
+reg [9:0] videocap_y3 = 0;
+reg [23:0] videocap_addr = 0;
+reg [15:0] videocap_data = 0;
+reg [7:0] videocap_porch = 'h28;
+reg [9:0] videocap_hs = 0;
+reg [4:0] videocap_vs = 0;
+reg [2:0] videocap_state = 0;
+reg [9:0] videocap_save_x = 0;
+reg [9:0] videocap_line_saved_y = 0;
+reg [9:0] videocap_xsync = 100;
+reg videocap_line_saved = 0;
+
+reg [7:0] vscount = 0;
+reg [7:0] vsmax = 0;
+reg [9:0] videocap_prex = 400;
+reg [8:0] videocap_height = 'h106;
+reg vsynced = 0;
+
+reg vcbuf=0;
+
+parameter VCAPW = 399;
+
+reg [15:0] videocap_buf [0:VCAPW];
+reg [15:0] videocap_buf2 [0:VCAPW];
+
+// CAPTURE
+always @(posedge zE7M) begin
+  /*videocap_data <= {videoR3,videoR2,videoR1,videoR0,1'b00, 
+                    videoG3,videoG2,videoG1,videoG0,2'b00,
+                    videoB3,videoB2,videoB1,videoB0,1'b00};*/
+  
+   /**/
+  
+  videocap_hs <= {videocap_hs[8:0], videoHS};
+  videocap_vs <= {videocap_vs[3:0], videoVS};
+  
+  /*if (vsynced==0 && videocap_vs[4:1]==0) begin
+    if (vscount>=vsmax) begin
+      videocap_y <= 0;
+      videocap_y2 <= 0;
+      videocap_x <= 0;
+      vscount <= 0;
+      vsynced <= 1;
+    end else
+      vscount <= vscount + 1;
+  end else if (vsynced==0) begin
+    vscount <= 0;
+  end else */ /*if (videocap_y>videocap_height) begin
+    vsynced <= 0;
+    vscount <= 0;
+    videocap_y <= 0;
+    videocap_y2 <= 0;
+  end else if (videocap_state==0 && videocap_hs[7:1]==0) begin
+    videocap_state<=1;
+    videocap_x <= 0;
+  end
+  else if (videocap_state==1 && videocap_hs[7:1]==7'b1111111) begin
+    videocap_state<=0;
+    videocap_y <= videocap_y + 1'b1;
+    videocap_y2 <= videocap_y2 + 1'b1;
+    if (videocap_y > videocap_porch) begin
+      videocap_y2 <= videocap_y2 + 1'b1;
+    end
+    videocap_x <= 0;
+  end else */
+  
+  if (videocap_hs[6:1]=='b000111) begin
+    videocap_x <= 0;
+    if (videocap_y2>videocap_height) begin
+      videocap_y2 <= 0;
+    end else begin
+      videocap_y2 <= videocap_y2 + 1'b1;
+    end
+  end else if (videocap_x<VCAPW) begin
+    videocap_x <= videocap_x + 1'b1;
+    //if (vcbuf==0)
+    videocap_buf[videocap_x] <= {videoR3,videoR2,videoR1,videoR0,1'b00, 
+                    videoG3,videoG2,videoG1,videoG0,2'b00,
+                    videoB3,videoB2,videoB1,videoB0,1'b00};
+    /*else
+    videocap_buf2[videocap_x-videocap_prex] <= {videoR3,videoR2,videoR1,videoR0,1'b00, 
+                    videoG3,videoG2,videoG1,videoG0,2'b00,
+                    videoB3,videoB2,videoB1,videoB0,1'b00};*/
+    
+  end else begin
+    
+  end
+  
+end
 
 always @(posedge z_sample_clk) begin
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
@@ -665,6 +755,7 @@ parameter RAM_REFRESH = 10;
 parameter RAM_READING_ZORRO = 11;
 parameter RAM_REFRESH_PRE = 12;
 parameter RAM_WRITING_ZORRO_PRE = 13;
+parameter RAM_CAP_WRITE = 14;
 
 reg [11:0] need_row_fetch_y = 0;
 reg [11:0] need_row_fetch_y_latched = 0;
@@ -748,7 +839,7 @@ always @(posedge z_sample_clk) begin
       z_confout <= 0;
       z3_confdone <= 0;
       
-      scalemode <= 0;
+      scalemode <= 1;
       colormode <= 1;
       dataout_enable <= 0;
       dataout <= 0;
@@ -777,10 +868,10 @@ always @(posedge z_sample_clk) begin
     
     PAUSE: begin
       // poor man's z3sense
-      if (zaddr_autoconfig) begin
+      /*if (zaddr_autoconfig) begin
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end else if (z3addr_autoconfig) begin
+      end else*/ if (z3addr_autoconfig) begin
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
       end
@@ -955,7 +1046,7 @@ always @(posedge z_sample_clk) begin
     end
     
     CONFIGURED: begin
-      scalemode <= 0;
+      scalemode <= 1;
       colormode <= 1;
       blitter_base <= 0;
       pan_ptr <= 0;
@@ -1432,6 +1523,7 @@ always @(posedge z_sample_clk) begin
         'h0c: margin_x <= regdata_in[9:0];
         'h0e: default_data <= regdata_in[15:0];
         'h10: preheat_x <= regdata_in[4:0];
+        'h12: vsmax <= regdata_in[7:0];
         'h14: safe_x2 <= regdata_in[10:0];
         'h1a: fetch_preroll <= regdata_in[10:0];
         
@@ -1475,10 +1567,10 @@ always @(posedge z_sample_clk) begin
         
         'h48: colormode <= regdata_in[2:0];
         
-        //'h50: capture_mode <= regdata_in[0];
-        //'h52: capture_freq <= regdata_in[5:0];
-        //'h54: capture_porch <= regdata_in[7:0];
-        //'h56: capture_shift <= regdata_in[9:0];
+        'h50: videocap_xsync <= regdata_in[9:0];
+        'h52: videocap_height <= regdata_in[8:0];
+        'h54: videocap_porch <= regdata_in[7:0];
+        'h56: videocap_prex <= regdata_in[9:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
@@ -1509,6 +1601,15 @@ always @(posedge z_sample_clk) begin
 
 // =================================================================================
 // RAM ARBITER
+
+  videocap_y3 <= videocap_y2;
+
+  if (videocap_line_saved_y!=videocap_y3 && videocap_line_saved==1) begin
+    videocap_line_saved <= 0;
+    videocap_line_saved_y <= videocap_y2;
+    videocap_save_x <= 0;
+    videocap_addr <= (videocap_y2<<row_pitch_shift);
+  end
 
   case (ram_arbiter_state)
     RAM_READY: begin
@@ -1619,7 +1720,7 @@ always @(posedge z_sample_clk) begin
           blitter_enable <= 0;
           //ram_enable <= 0;
         end
-      /*end else if (blitter_enable==2 && cmd_ready) begin
+      end else if (blitter_enable==2 && cmd_ready) begin
         // block copy read
         if (data_out_queue_empty) begin
           ram_byte_enable <= 'b11;
@@ -1665,25 +1766,51 @@ always @(posedge z_sample_clk) begin
         end
         
         blitter_enable <= 5; // next
-      end else if (blitter_enable==5) begin
+      end else if (blitter_enable==5 && cmd_ready) begin
         if (blitter_curx2==blitter_x4 && blitter_cury2 == blitter_y4)
           blitter_enable <= 0;
         else
           blitter_enable <= 2;
         ram_enable <= 0;
-        */
+        
       // ZORRO READ/WRITE ----------------------------------------------
-      end else if (/*blitter_enable==0 &&*/ zorro_ram_write_request && cmd_ready) begin
+      end else if (blitter_enable==0 && zorro_ram_write_request && cmd_ready) begin
         // process write request
         ram_arbiter_state <= RAM_WRITING_ZORRO_PRE;
       /*end else if (blitter_enable) begin
         blitter_enable <= 0;*/
-      end else if (/*blitter_enable==0 &&*/ zorro_ram_read_request && cmd_ready) begin
+      end else if (blitter_enable==0 && zorro_ram_read_request && cmd_ready) begin
         // process read request
         zorro_ram_read_done <= 0;
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READING_ZORRO_PRE;
+      end else if (!videocap_line_saved && cmd_ready) begin
+        // CAPTURE
+        ram_enable <= 1;
+        ram_write <= 1;
+        ram_byte_enable <= 'b11;
+        ram_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x;
+        /*if (vcbuf==0)
+          ram_data_in <= videocap_buf2[videocap_save_x];
+        else*/
+          ram_data_in <= videocap_buf[videocap_save_x];
+        
+        if (videocap_save_x<330) begin
+          videocap_save_x <= videocap_save_x + 1'b1;
+          //videocap_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x; //videocap_addr+1'b1;
+        end else begin
+          videocap_line_saved <= 1;
+          videocap_save_x <= 0;
+          vcbuf <= ~vcbuf;
+        end
+        //ram_arbiter_state <= RAM_CAP_WRITE;
       end
+    
+    RAM_CAP_WRITE: begin
+      ram_enable <= 0;
+      ram_write <= 0;
+      ram_arbiter_state <= RAM_ROW_FETCHED;
+    end
     
     RAM_REFRESH_PRE: begin
       ram_enable <= 1;
