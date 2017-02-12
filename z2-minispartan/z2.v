@@ -121,7 +121,7 @@ reg [1:0] vga_clk_sel = 0;
 
 reg vga_clk_sel0_latch = 0;
 // 
-BUFGMUX /*#(.CLK_SEL_TYPE("ASYNC"))*/ vga_clk_mux2(
+BUFGMUX #(.CLK_SEL_TYPE("ASYNC")) vga_clk_mux2(
   .O(vga_clk), 
   .I0(vga_clk_75),
   .I1(vga_clk_40),
@@ -180,8 +180,10 @@ wire data_out_queue_empty;
 wire [4:0] sdram_state;
 wire sdram_btb;
 reg  [15:0] ram_data_in;
+reg  [15:0] ram_data_in_next;
 reg  ram_write = 0;
 reg  ram_burst = 0;
+reg  ram_write_burst = 0;
 reg  [1:0]  ram_byte_enable;
 
 reg  [15:0] fetch_buffer [0:1999];
@@ -219,8 +221,10 @@ SDRAM_Controller_v sdram(
   .cmd_byte_enable(ram_byte_enable),
   .cmd_address(ram_addr),
   .cmd_data_in(ram_data_in),
+  .cmd_data_in_next(ram_data_in_next),
   .burst_col(ram_burst_col),
   .burst(ram_burst),
+  .write_burst(ram_write_burst),
   
   // read data port
   .data_out(ram_data_out),
@@ -394,7 +398,8 @@ reg [7:0] sprite_palette_b [0:3];*/
 // 1 == 16 bit
 // 2 == 32 bit
 reg [2:0] colormode = 3;
-reg [1:0] scalemode = 0;
+reg [1:0] scalemode_h = 0;
+reg [1:0] scalemode_v = 0;
 reg [1:0] counter_scale = 0;
 
 reg [15:0] REVISION = 'h0004;
@@ -538,6 +543,7 @@ reg z3_fcs_state = 0;
 // video capture regs
 reg videocap_mode = 0;
 reg [9:0] videocap_x = 0;
+reg [9:0] videocap_x2 = 0;
 reg [9:0] videocap_y = 0;
 reg [9:0] videocap_y2 = 0;
 reg [9:0] videocap_y3 = 0;
@@ -546,17 +552,19 @@ reg [23:0] videocap_addr = 0;
 reg [15:0] videocap_data = 0;
 reg [7:0] videocap_porch = 'h28;
 reg [9:0] videocap_hs = 0;
+reg [9:0] videocap_hs2 = 0;
 reg [9:0] videocap_vs = 0;
 reg [2:0] videocap_state = 0;
 reg [9:0] videocap_save_x = 0;
+reg [9:0] videocap_save_x2 = 0;
 reg [9:0] videocap_line_saved_y = 0;
-reg [9:0] videocap_xsync = 100;
+reg  [23:0] videocap_save_next_addr = 0;
 reg videocap_line_saved = 0;
 
 reg [7:0] vscount = 0;
 reg [7:0] vsmax = 0;
 reg [9:0] videocap_prex = 'h41;
-reg [8:0] videocap_height = 'h105;
+reg [8:0] videocap_height = 'h117;
 reg vsynced = 0;
 
 reg vcbuf=0;
@@ -564,18 +572,26 @@ reg vcbuf=0;
 parameter VCAPW = 399;
 
 reg [15:0] videocap_buf [0:VCAPW];
-//reg [15:0] videocap_buf2 [0:VCAPW];
+reg [15:0] videocap_buf2 [0:VCAPW];
 
 reg [15:0] videocap_rgbin = 0;
+reg [15:0] videocap_rgbin2 = 0;
+
+reg videocap_hires = 1;
+reg [9:0] videocap_resstat = 0;
+reg [9:0] videocap_hires_lines = 0;
+
+reg [7:0] videocap_thry = 10;
+reg [7:0] videocap_thrx = 10;
 
 // CAPTURE
 always @(posedge zE7M) begin
   videocap_hs <= {videocap_hs[8:0], videoHS};
   videocap_vs <= {videocap_vs[8:0], videoVS};
   
-  videocap_rgbin <= {videoR3,videoR2,videoR1,videoR0,1'b00, 
-                    videoG3,videoG2,videoG1,videoG0,2'b00,
-                    videoB3,videoB2,videoB1,videoB0,1'b00};
+  videocap_rgbin <= {videoR3,videoR2,videoR1,videoR0,videoR3, 
+                    videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
+                    videoB3,videoB2,videoB1,videoB0,videoB3};
   
   if (!videocap_mode) begin
     // do nothing
@@ -590,6 +606,23 @@ always @(posedge zE7M) begin
   end else if (videocap_x<VCAPW) begin
     videocap_x <= videocap_x + 1'b1;
     videocap_buf[videocap_x-videocap_prex] <= videocap_rgbin;
+  end
+end
+
+always @(negedge zE7M) begin
+  //videocap_hs2 <= {videocap_hs2[8:0], videoHS};
+  
+  videocap_rgbin2 <= {videoR3,videoR2,videoR1,videoR0,videoR3, 
+                    videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
+                    videoB3,videoB2,videoB1,videoB0,videoB3};
+  
+  if (!videocap_mode) begin
+    // do nothing
+  end else if (videocap_hs[6:1]=='b000111) begin
+    videocap_x2 <= 0;
+  end else if (videocap_x2<VCAPW) begin
+    videocap_x2 <= videocap_x2 + 1'b1;
+    videocap_buf2[videocap_x2-videocap_prex] <= videocap_rgbin2;
   end
 end
 
@@ -789,7 +822,7 @@ always @(posedge z_sample_clk) begin
     RESET: begin
       vga_clk_sel  <= 1;
       
-      screen_w     <= 'h150; 
+      screen_w     <= 'h280;
       h_rez        <= 640;
       h_sync_start <= 832;
       h_sync_end   <= 896;
@@ -821,7 +854,8 @@ always @(posedge z_sample_clk) begin
       z_confout <= 0;
       z3_confdone <= 0;
       
-      scalemode <= 1;
+      scalemode_h <= 0;
+      scalemode_v <= 1;
       colormode <= 1;
       dataout_enable <= 0;
       dataout <= 0;
@@ -834,7 +868,7 @@ always @(posedge z_sample_clk) begin
       z_ovr <= 0;
       
       blitter_base <= 0;
-      pan_ptr <= 'h5000; // capture vertical offset
+      pan_ptr <= 'ha000; // capture vertical offset
       burst_enabled <= 1;
       margin_x <= 8;
       
@@ -1446,6 +1480,7 @@ always @(posedge z_sample_clk) begin
               z3_regread_lo <= {sd_data_out,8'h00}; end // 'h6e
         
         'h70: begin z3_regread_hi <= sd_error; z3_regread_lo <= 0; end
+        
         /*'h72: data_z3_low16 <= sd_clkdiv;*/
      
 `ifdef TRACE
@@ -1479,7 +1514,10 @@ always @(posedge z_sample_clk) begin
       end else
       case (zaddr_regpart)
         'h02: screen_w <= regdata_in[11:0];
-        'h04: scalemode <= regdata_in[1:0];
+        'h04: begin
+          scalemode_h <= regdata_in[1:0];
+          scalemode_v <= regdata_in[3:2];
+        end
         'h06: begin
           screen_w <= regdata_in[11:0];
           h_rez    <= regdata_in[11:0];
@@ -1548,9 +1586,10 @@ always @(posedge z_sample_clk) begin
         
         'h48: colormode <= regdata_in[2:0];
         
+        'h4a: videocap_thry <= regdata_in[7:0];
         'h4e: videocap_mode <= regdata_in[0];
         
-        'h50: videocap_xsync <= regdata_in[9:0];
+        'h50: videocap_thrx <= regdata_in[7:0];
         'h52: videocap_height <= regdata_in[8:0];
         'h54: videocap_porch <= regdata_in[7:0];
         'h56: videocap_prex <= regdata_in[9:0];
@@ -1593,7 +1632,16 @@ always @(posedge z_sample_clk) begin
       videocap_line_saved <= 0;
       videocap_line_saved_y <= videocap_y2;
       videocap_save_x <= 0;
+      videocap_save_x2 <= 0; //vcbuf;
       videocap_addr <= (videocap_y2<<row_pitch_shift);
+      
+      /*if (videocap_hires) begin
+        scalemode_h <= 0;
+        screen_w    <= 'h280;
+      end else begin
+        scalemode_h <= 1;
+        screen_w    <= 'h140;
+      end*/
     end
   end
 
@@ -1608,6 +1656,8 @@ always @(posedge z_sample_clk) begin
       if (row_fetched) begin
         ram_enable <= 0;
         ram_burst <= 0;
+        // 2-word burst for faster videocap
+        ram_write_burst <= videocap_mode;
         if (data_out_queue_empty)
           ram_arbiter_state <= RAM_BURST_OFF;
       end else begin
@@ -1770,33 +1820,33 @@ always @(posedge z_sample_clk) begin
         zorro_ram_read_done <= 0;
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READING_ZORRO_PRE;
-      end else if (!videocap_line_saved && cmd_ready) begin
+      end else if (!videocap_line_saved && videocap_mode && cmd_ready) begin
         // CAPTURE
         ram_enable <= 1;
         ram_write <= 1;
         ram_byte_enable <= 'b11;
-        ram_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x;
-        /*if (vcbuf==0)
-          ram_data_in <= videocap_buf2[videocap_save_x];
-        else*/
-          ram_data_in <= videocap_buf[videocap_save_x];
-        
-        if (videocap_save_x<330) begin
-          videocap_save_x <= videocap_save_x + 1'b1;
-          //videocap_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x; //videocap_addr+1'b1;
+        ram_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x2;
+        ram_data_in <= videocap_buf2[videocap_save_x];
+        ram_data_in_next <= videocap_buf[videocap_save_x];
+          
+        if (videocap_save_x<319) begin
+          videocap_save_x  <= videocap_save_x  + 1'b1;
+          videocap_save_x2 <= videocap_save_x2  + 2'b10;
         end else begin
           videocap_line_saved <= 1;
-          videocap_save_x <= 0;
-          vcbuf <= ~vcbuf;
         end
-        //ram_arbiter_state <= RAM_CAP_WRITE;
       end
     
-    RAM_CAP_WRITE: begin
-      ram_enable <= 0;
-      ram_write <= 0;
+    /*RAM_CAP_WRITE: begin
+      //ram_addr <= (videocap_line_saved_y<<row_pitch_shift) + videocap_save_x2;
+      ram_addr <= videocap_save_next_addr + 1'b1;
+      ram_enable <= 1;
+      ram_write <= 1;
+      
+      //videocap_save_x2  <= videocap_save_x2  + 1'b1;
+      videocap_save_x  <= videocap_save_x  + 1'b1;
       ram_arbiter_state <= RAM_ROW_FETCHED;
-    end
+    end*/
     
     RAM_REFRESH_PRE: begin
       ram_enable <= 1;
@@ -1906,7 +1956,7 @@ always @(posedge vga_clk) begin
     counter_x <= counter_x + 1'b1;
     if (counter_x > h_max-fetch_preroll)
       if (counter_y<screen_h)
-        need_row_fetch_y <= (counter_y+1'b1)>>scalemode;
+        need_row_fetch_y <= (counter_y+1'b1)>>scalemode_v;
       else
         need_row_fetch_y <= 0;
   end
@@ -1932,7 +1982,7 @@ always @(posedge vga_clk) begin
   else begin
     display_pixels <= 0;
     preheat <= 1;
-    counter_scale <= scalemode;
+    counter_scale <= scalemode_h;
     counter_8x <= margin_x;
     counter_x_hi <= 0;
     display_x2 <= {margin_x,1'b0};
@@ -2043,7 +2093,7 @@ always @(posedge vga_clk) begin
       green_p <= 0;
       blue_p <= 0;
       preheat <= 0;
-    end else if (counter_scale != scalemode) begin
+    end else if (counter_scale != scalemode_h) begin
       counter_scale <= counter_scale + 1'b1;
     end else if (counter_x_hi==1) begin
       red_p   <= palette_r[fetch_buffer[counter_8x][7:0]];
@@ -2061,7 +2111,7 @@ always @(posedge vga_clk) begin
     end
   end else if (colormode==1) begin
     // decode 16 to 24 bit color
-    if (counter_scale != scalemode) begin
+    if (counter_scale != scalemode_h) begin
       counter_scale <= counter_scale + 1'b1;
     end else begin
       counter_scale <= 0;
@@ -2075,7 +2125,7 @@ always @(posedge vga_clk) begin
     
   end else if (colormode==2) begin
     // true color
-    if (counter_scale != scalemode) begin
+    if (counter_scale != scalemode_h) begin
       counter_scale <= counter_scale + 1'b1;
     end else begin
       counter_scale <= 0;

@@ -33,9 +33,9 @@
 module SDRAM_Controller_v (
    clk,   reset,
    // command and write port
-   cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in,
+   cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in, cmd_data_in_next,
    // Read data port
-   data_out, data_out_ready, data_out_queue_empty, burst,
+   data_out, data_out_ready, data_out_queue_empty, burst, write_burst,
    burst_col,
    // SDRAM signals
    SDRAM_CLK,  SDRAM_CKE,  SDRAM_CS,   SDRAM_RAS,  SDRAM_CAS,
@@ -55,12 +55,15 @@ module SDRAM_Controller_v (
    input  [sdram_address_width-1:0] cmd_address;
    input  [1:0]  cmd_byte_enable;
    input  [15:0] cmd_data_in;
+   input  [15:0] cmd_data_in_next;
    input  [8:0] burst_col;
    input  burst;
+   input  write_burst;
    
    reg [3:0]  iob_command  = CMD_NOP;
    reg [12:0] iob_address  = 13'b0000000000000;
    reg [15:0] iob_data     = 16'b0000000000000000;
+   reg [15:0] iob_data_next= 16'b0000000000000000;
    reg [1:0]  iob_dqm      = 2'b00;
    reg iob_cke             = 1'b0;
    reg [1:0]  iob_bank     = 2'b00;
@@ -111,7 +114,7 @@ module SDRAM_Controller_v (
    parameter CMD_LOAD_MODE_REG = 4'b0000;
 
    wire [12:0] MODE_REG;    // Reserved, wr burst, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
-   assign      MODE_REG =        {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b000};
+   assign      MODE_REG =        {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   2'b00, write_burst};
    
    wire [12:0] MODE_REG_BURST;    // Reserved, wr burst, OpMode, CAS Latency (2), Burst Type, Burst Length (2)
    assign      MODE_REG_BURST =  {3'b000,    1'b0,  2'b00,          3'b010,       1'b0,   3'b111};
@@ -155,6 +158,7 @@ module SDRAM_Controller_v (
    reg [1:0]  save_bank         = 2'b00;
    reg [sdram_row_bits-1:0] save_col          = 13'b0000000000000;
    reg [15:0] save_data_in      = 16'b0000000000000000;
+   reg [15:0] save_data_in_next = 16'b0000000000000000;
    reg [1:0]  save_byte_enable  = 2'b00;
    
    // control when new transactions are accepted 
@@ -248,6 +252,7 @@ always @(posedge clk)
         save_col         <= addr_col;
         save_wr          <= cmd_wr; 
         save_data_in     <= cmd_data_in;
+        save_data_in_next<= cmd_data_in_next;
         save_byte_enable <= cmd_byte_enable;
         got_transaction  <= 1'b1;
         ready_for_new    <= 1'b0;
@@ -457,31 +462,36 @@ always @(posedge clk)
          // -- Processing the write transaction
          //-------------------------------------------------------------------
          s_write_1: begin
-               state                     <= s_write_2;
-               iob_command               <= CMD_WRITE;
-               iob_address               <= save_col; 
-               iob_address[prefresh_cmd] <= 1'b0;
-               iob_bank                  <= save_bank;
-               iob_dqm                   <= ~ save_byte_enable[1:0];      
-               iob_data                  <= save_data_in[15:0];
-            end
+           if (write_burst)
+             state <= s_write_2;
+           else
+             state <= s_write_3;
+           
+           iob_command               <= CMD_WRITE;
+           iob_address               <= save_col; 
+           iob_address[prefresh_cmd] <= 1'b0;
+           iob_bank                  <= save_bank;
+           iob_dqm                   <= ~ save_byte_enable[1:0];
+           iob_data                  <= save_data_in[15:0];
+           iob_data_next             <= save_data_in_next[15:0];
+         end
          s_write_2: begin
-            $display("w2 %h\t%h\t%h", save_bank, save_row, iob_address);
-               state           <= s_write_3;
-               // can we do a back-to-back write?
-               if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
-                  if (save_wr == 1'b1) begin
-                     $display("back-to-back write");
-                     
-                     // back-to-back write?
-                     state           <= s_write_1;
-                     ready_for_new   <= 1'b1;
-                     got_transaction <= 1'b0;
-                  end
-                  // Although it looks right in simulation you can't go write-to-read 
-                  // here due to bus contention, as iob_dq_hiz takes a few ns.
-               end
-            end
+             state           <= s_write_3;
+             iob_data        <= iob_data_next;
+             iob_command               <= CMD_NOP;
+             
+             // can we do a back-to-back write?
+             if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
+                if (save_wr == 1'b1) begin
+                   // back-to-back write?
+                   state           <= s_write_1;
+                   ready_for_new   <= 1'b1;
+                   got_transaction <= 1'b0;
+                end
+                // Although it looks right in simulation you can't go write-to-read 
+                // here due to bus contention, as iob_dq_hiz takes a few ns.
+             end
+          end
          s_write_3: begin
                // must wait tRDL, hence the extra idle state
                //-- back to back transaction?
