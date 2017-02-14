@@ -72,6 +72,22 @@ struct ModeInfo {
   uint16 height;
   uint8 depth;
   uint8 flags;
+
+  uint16 hmax;
+	uint16 hblank_size;
+	uint16 hsync_start;
+	uint16 hsync_size;
+	uint8 hskew;
+	uint8 hskew_enable;
+	
+	uint16 vmax;
+	uint16 vblank_size;
+	uint16 vsync_start;
+	uint16 vsync_size;
+	
+	uint8 clock;
+	uint8 clock_div;
+	uint32 pixel_clock_hz;
 };
 
 struct RenderInfo {
