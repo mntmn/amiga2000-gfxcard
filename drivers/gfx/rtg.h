@@ -93,6 +93,8 @@ struct ModeInfo {
 struct RenderInfo {
   void* memory;
   uint16 pitch;
+  uint16 unknown1;
+  uint32 color_format;
 };
 
 struct RTGBoard {
