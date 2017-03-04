@@ -58,13 +58,13 @@ int FindCard(struct RTGBoard* b) {
   }
   
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
-    debug("MNT VA2000 rev 1 found.");
+    debug("MNT VA2000 found.");
     b->memory = (uint8*)(cd->cd_BoardAddr);
     b->memory_size = cd->cd_BoardSize-0x10000;
     b->registers = (((uint8*)b->memory)+(cd->cd_BoardSize-0x10000));
-    debug("memory %lx",b->memory);
-    debug("memsize %lx",b->memory_size);
-    debug("regs %lx",b->registers);
+    debug("Memory %lx",b->memory);
+    debug("Memsize %lx",b->memory_size);
+    debug("Regs %lx",b->registers);
     return 1;
   } else {
     debug("MNT VA2000 not found!");
@@ -89,8 +89,6 @@ int InitCard(struct RTGBoard* b) {
   
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
   b->sprite_flags = 0; //b->color_formats;
-
-  // TODO true color
   b->bits_per_channel = 6;
 
   max = 8191;
@@ -233,7 +231,6 @@ void set_palette(register struct RTGBoard* b asm("a0"), uint16 idx asm("d0"), ui
 uint16 calc_pitch_bytes(uint16 w, uint16 colormode) {
   uint16 pitch = 2048;
   if (w<=1024) pitch = 1024;
-  if (w<=512) pitch = 512;
 
   pitch = pitch<<colormode;
   return pitch;
@@ -286,20 +283,17 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
 
     registers->pixel_clk_sel = MNTVA_CLK_75MHZ;
   }
-  /*else if (m->width==1280 && m->height==1024) {
-    *((uint16*)(registers+0x70)) = 1328;
-    *((uint16*)(registers+0x72)) = 1440;
-    *((uint16*)(registers+0x74)) = 1600;
+  else if (w==1280 && h==1024) {
+    registers->h_sync_start = 1328;
+    registers->h_sync_end = 1440;
+    registers->h_max = 1600;
     
-    *((uint16*)(registers+0x76)) = 1025;
-    *((uint16*)(registers+0x78)) = 1028;
-    *((uint16*)(registers+0x7a)) = 1066;
+    registers->v_sync_start = 1025;
+    registers->v_sync_end = 1028;
+    registers->v_max = 1066;
     
-    *((uint16*)(registers+0x7c)) = 3; // 100mhz
-    
-    pitch = 2048;
-    pitch_shift = 11;
-  }*/
+    registers->pixel_clk_sel = MNTVA_CLK_100MHZ; // 100mhz
+  }
   else if (w==1920 && h==1080) {
     registers->h_sync_start = 1992;
     registers->h_sync_end = 2000;
@@ -312,13 +306,13 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     registers->pixel_clk_sel = MNTVA_CLK_75MHZ;
   }
   else {
-    registers->h_sync_start = 832;
-    registers->h_sync_end = 896;
-    registers->h_max = 1048;
+    registers->h_sync_start = 840;
+    registers->h_sync_end = 968;
+    registers->h_max = 1056;
     
     registers->v_sync_start = 601;
-    registers->v_sync_end = 604;
-    registers->v_max = 631;
+    registers->v_sync_end = 605;
+    registers->v_max = 628;
 
     registers->pixel_clk_sel = MNTVA_CLK_40MHZ;
   }
@@ -351,15 +345,8 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
 
   init_modeline(registers, w, h);
   colormode = rtg_to_mnt_colormode(b->color_format);
-  pitch = calc_pitch_bytes(w, colormode)/2; // convert to words
+  pitch = calc_pitch_bytes(m->width, colormode)/2; // convert to words
   pitch_shift = pitch_to_shift(pitch);
-
-  kprintf("w %lu\n",(uint32)w);
-  kprintf("h %lu\n",(uint32)h);
-  kprintf("color_format %lu\n",b->color_format);
-  kprintf("colormode %lu\n",(uint32)colormode);
-  kprintf("pitch %lu\n",(uint32)pitch);
-  kprintf("pitch_shift %lu\n",(uint32)pitch_shift);
   
   if (colormode==MNTVA_COLOR_8BIT) {
     registers->margin_x = 8; // CHECK
@@ -373,7 +360,6 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   registers->row_pitch = pitch;
   registers->row_pitch_shift = pitch_shift;
   
-  // CHECK
   registers->preheat_x = 1;
   
   registers->scalemode = (scale<<2) | scale; // vscale|hscale
@@ -385,8 +371,7 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
     // for 32bit color, screenw is 2*hrez (fetch double the data)
     registers->line_w = 4+2*w;
   } else if (colormode==MNTVA_COLOR_8BIT) {
-    // CHECK
-    //registers->line_w = w/2;
+    registers->line_w = w/2; // fetch half the data per line
   }
 }
 
@@ -396,7 +381,6 @@ uint32 is_bitmap_compatible(register struct RTGBoard* b asm("a0"), uint16 format
 
 uint32 map_address(register struct RTGBoard* b asm("a0"), uint32 addr asm("a1")) {
   if (addr>(uint32)b->memory && addr < (((uint32)b->memory) + b->memory_size)) {
-    // FIXME
     addr=addr&0xfffff000;
   }
   return addr; // direct mapping
@@ -422,10 +406,15 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     registers->scalemode = 4; // scalemode x1:1, y2:1
     registers->capture_mode = 1;
     registers->pan_ptr_hi = 0xf8;
-    registers->pan_ptr_lo = 0xa000; // capture to the end of video memory
+    registers->pan_ptr_lo = 0x9c00; // capture to the end of video memory
     
     init_modeline(registers, 640, 480);
-    registers->line_w = 0x280; // CHECK
+    registers->row_pitch = 1024;
+    registers->row_pitch_shift = 10;
+    registers->screen_w = 640;
+    registers->screen_h = 480;
+    registers->line_w = 0x280;
+    registers->margin_x = 0xa;
   } else {
     // rtg mode
     registers->capture_mode = 0;
@@ -490,9 +479,9 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   } else if (color_format==9) {
     // true color
     x*=2;
-    w--;
     w*=2;
     h--;
+    w--;
     registers->blitter_rgb32_hi = color>>16;
     registers->blitter_rgb32_lo = color&0xffff;
     registers->blitter_colormode = MNTVA_COLOR_32BIT;
@@ -516,6 +505,10 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   MNTVARegs* registers = b->registers;
   uint16 pitch = 1024;
   uint32 color_format = b->color_format;
+  uint8* gfxmem = (uint8*)b->memory;
+  uint8* ptr;
+  uint8* ptr_src;
+  int i;
 
   if (r) {
     uint32 offset = (r->memory-(b->memory))>>1;
@@ -529,17 +522,50 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   registers->blitter_row_pitch_shift = pitch_to_shift(pitch/2);
   
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
+    // copy odd rows manually
+    if (x&1 && dx&1) {
+      ptr = gfxmem+dy*pitch+dx;
+      ptr_src = gfxmem+y*pitch+x;
+      for (i=0;i<h;i++) {
+        *ptr=*ptr_src;
+        ptr+=pitch;
+        ptr_src+=pitch;
+      }
+      x++;
+      dx++;
+      w--;
+    } else if (x&1 || dx&1) {
+      // perform the whole blit manually because we
+      // can't to byte swapping yet
+      b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
+      return;
+    }
+    
+    if (w&1) {
+      ptr = gfxmem+dy*pitch+dx+w-1;
+      ptr_src = gfxmem+y*pitch+x+w-1;
+      for (i=0;i<h;i++) {
+        *ptr=*ptr_src;
+        ptr+=pitch;
+        ptr_src+=pitch;
+      }
+      w--;
+    }
+
     dx/=2;
     x/=2;
     w/=2;
+    if (w<1) return;
+    w--;
     h--;
   } else if (color_format==9) {
     x*=2;
     dx*=2;
     w*=2;
+    w--;
     h--;
   } else {
-    if (dx>=x) w--;
+    w--;
     h--;
   }
 

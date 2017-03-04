@@ -200,7 +200,7 @@ struct RTGBoard {
   void* fn_rect_invert;
   void* fn_rect_invert_fallback;
   void* fn_rect_copy;
-  void* fn_rect_copy_fallback;
+  void (*fn_rect_copy_fallback)(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7"));
   void* f34;
   void* f35;
   void* fn_rect_pattern;
