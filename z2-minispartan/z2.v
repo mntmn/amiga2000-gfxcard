@@ -820,11 +820,11 @@ always @(posedge z_sample_clk) begin
 `endif
 
   if (z_cfgin_lo || z_reset) begin
-    zorro_state <= RESET;
+    //zorro_state <= RESET;
   end else
   case (zorro_state)
     RESET: begin
-      vga_clk_sel  <= 1;
+      /*vga_clk_sel  <= 1;
       
       // new default mode is 640x480 wrapped in 800x600@60hz
       screen_w     <= 'h280;
@@ -840,16 +840,16 @@ always @(posedge z_sample_clk) begin
       v_max        <= 631;
       
       row_pitch    <= 1024;
-      row_pitch_shift <= 10;
+      row_pitch_shift <= 10;*/
       
       videocap_mode <= 0;
-      dvid_reset <= 1;
+      dvid_reset <= 0; //1;
       
       z_confout <= 0;
       z3_confdone <= 0;
       
       scalemode_h <= 0;
-      scalemode_v <= 1;
+      scalemode_v <= 0;
       colormode <= 1;
       blitter_colormode <= 1;
       dataout_enable <= 0;
@@ -861,8 +861,8 @@ always @(posedge z_sample_clk) begin
       sdram_reset <= 1;
       z_ovr <= 0;
       
-      blitter_base <= 'hf89c00;
-      pan_ptr <= 'hf89c00; // capture vertical offset
+      blitter_base <= 0; //'hf89c00;
+      pan_ptr <= 0; //'hf89c00; // capture vertical offset
       burst_enabled <= 1;
       margin_x <= 10;
       preheat_x <= 1;
@@ -882,8 +882,7 @@ always @(posedge z_sample_clk) begin
       reg_low   <= 'h600000 + ram_size;
       reg_high  <= 'h600000 + ram_size + reg_size;
       
-      //if (clock_locked /*&& znRST_sync[1] == 1'b1*/)
-        zorro_state <= DECIDE_Z2_Z3;
+      zorro_state <= CONFIGURED;
     end
     
     DECIDE_Z2_Z3: begin
@@ -1078,20 +1077,23 @@ always @(posedge z_sample_clk) begin
       
       sdram_reset <= 0;
       blitter_enable <= 1;
-      blitter_rgb <= 'h0000;
+      blitter_rgb <= 'h8888;
       
       zorro_state <= CONFIGURED_CLEAR;
     end
     
     CONFIGURED_CLEAR: begin
       if (blitter_enable==0) begin
-        videocap_mode <= 1;
+        blitter_enable <= 1;
+        blitter_rgb <= blitter_rgb+1'b1;
+      end
+      
+      /*  videocap_mode <= 1;
         if (ZORRO3) begin
           zorro_state <= Z3_IDLE;
         end else begin
           zorro_state <= Z2_IDLE;
-        end
-      end
+        end*/
     end
   
     // ----------------------------------------------------------------------------------
