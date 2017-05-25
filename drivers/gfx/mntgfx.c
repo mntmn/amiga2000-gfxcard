@@ -28,9 +28,9 @@
 #include "mntgfx.h"
 #include "va2000.h"
 
-#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
+//#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
 
-//#define debug(x,args...) ;
+#define debug(x,args...) ;
 
 struct ExecBase* SysBase;
 struct Library* GfxBase;
@@ -51,6 +51,7 @@ void __UserLibCleanup(void)
 ADDTABL_1(FindCard,a0);
 int FindCard(struct RTGBoard* b) {
   struct ConfigDev* cd = NULL;
+  uint16 fwrev = 0;
   
   if ((ExpansionBase = (struct Library*)OpenLibrary("expansion.library",0L))==NULL) {
     debug("failed to open expansion.library!");
@@ -59,9 +60,14 @@ int FindCard(struct RTGBoard* b) {
   
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
     debug("MNT VA2000 found.");
-    b->memory = (uint8*)(cd->cd_BoardAddr);
+    b->memory = (uint8*)(cd->cd_BoardAddr)+0x10000;
     b->memory_size = cd->cd_BoardSize-0x10000;
-    b->registers = (((uint8*)b->memory)+(cd->cd_BoardSize-0x10000));
+    b->registers = (uint8*)(cd->cd_BoardAddr);
+    fwrev = ((uint16*)b->registers)[0];
+
+    // exit if fw rev not 5 (incompatible memory layout)
+    if (fwrev!=5) return 0;
+    
     debug("Memory %lx",b->memory);
     debug("Memsize %lx",b->memory_size);
     debug("Regs %lx",b->registers);
@@ -404,7 +410,6 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     // capture amiga video to 16bit
     registers->colormode = MNTVA_COLOR_16BIT565;
     registers->scalemode = 4; // scalemode x1:1, y2:1
-    registers->capture_mode = 1;
     registers->pan_ptr_hi = 0xf8;
     registers->pan_ptr_lo = 0x9c00; // capture to the end of video memory
     
@@ -412,9 +417,22 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     registers->row_pitch = 1024;
     registers->row_pitch_shift = 10;
     registers->screen_w = 640;
-    registers->screen_h = 480;
+    //registers->screen_h = 480;
+    registers->screen_h = 512;
+    registers->capture_h = 0x124;
     registers->line_w = 0x280;
     registers->margin_x = 0xa;
+
+    registers->capture_mode = 0;
+
+    // clear the capture buffer
+    registers->blitter_base_hi = 0xf8;
+    registers->blitter_base_lo = 0x9c00;
+    rect_fill(b, NULL, 0, 0, 640, 512, 0);
+    blitter_wait(b);
+    
+    registers->capture_mode = 1;
+
   } else {
     // rtg mode
     registers->capture_mode = 0;
@@ -522,8 +540,11 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   registers->blitter_row_pitch_shift = pitch_to_shift(pitch/2);
   
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
+    // fallback as long as 8-bit blitter is unstable
+    return b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
+    
     // copy odd rows manually
-    if (x&1 && dx&1) {
+    /*if (x&1 && dx&1) {
       ptr = gfxmem+dy*pitch+dx;
       ptr_src = gfxmem+y*pitch+x;
       for (i=0;i<h;i++) {
@@ -539,9 +560,9 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
       // can't to byte swapping yet
       b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
       return;
-    }
+    }*/
     
-    if (w&1) {
+    /*if (w&1) {
       ptr = gfxmem+dy*pitch+dx+w-1;
       ptr_src = gfxmem+y*pitch+x+w-1;
       for (i=0;i<h;i++) {
@@ -557,7 +578,7 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
     w/=2;
     if (w<1) return;
     w--;
-    h--;
+    h--;*/
   } else if (color_format==9) {
     x*=2;
     dx*=2;

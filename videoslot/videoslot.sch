@@ -1,4 +1,5 @@
 EESchema Schematic File Version 2
+LIBS:videoslot-rescue
 LIBS:power
 LIBS:device
 LIBS:transistors
@@ -47,7 +48,7 @@ Comment3 ""
 Comment4 ""
 $EndDescr
 $Comp
-L CN451 CN1
+L CN451-RESCUE-videoslot CN1
 U 1 1 579D05C5
 P 4350 4550
 F 0 "CN1" H 5150 4400 60  0000 C CNN
@@ -514,6 +515,39 @@ F 3 "" H 6900 2700 50  0000 C CNN
 	1    6900 2700
 	0    1    1    0   
 $EndComp
+$Comp
+L GND #PWR030
+U 1 1 58BDE7DB
+P 3750 1350
+F 0 "#PWR030" H 3750 1100 50  0001 C CNN
+F 1 "GND" H 3755 1177 50  0000 C CNN
+F 2 "" H 3750 1350 50  0000 C CNN
+F 3 "" H 3750 1350 50  0000 C CNN
+	1    3750 1350
+	-1   0    0    1   
+$EndComp
+$Comp
+L GND #PWR031
+U 1 1 58BDE86A
+P 3750 1850
+F 0 "#PWR031" H 3750 1600 50  0001 C CNN
+F 1 "GND" H 3755 1677 50  0000 C CNN
+F 2 "" H 3750 1850 50  0000 C CNN
+F 3 "" H 3750 1850 50  0000 C CNN
+	1    3750 1850
+	1    0    0    -1  
+$EndComp
+$Comp
+L GND #PWR032
+U 1 1 58BDE8EE
+P 3350 1850
+F 0 "#PWR032" H 3350 1600 50  0001 C CNN
+F 1 "GND" H 3355 1677 50  0000 C CNN
+F 2 "" H 3350 1850 50  0000 C CNN
+F 3 "" H 3350 1850 50  0000 C CNN
+	1    3350 1850
+	1    0    0    -1  
+$EndComp
 Wire Wire Line
 	4350 3850 3500 3850
 Wire Wire Line
@@ -523,11 +557,7 @@ Wire Wire Line
 Wire Wire Line
 	3500 4150 4350 4150
 Wire Wire Line
-	6850 4450 4050 4450
-Wire Wire Line
-	4050 4450 4050 3550
-Wire Wire Line
-	4050 3550 3500 3550
+	3500 3550 4150 3550
 Wire Wire Line
 	3600 3650 3500 3650
 Wire Wire Line
@@ -596,11 +626,10 @@ Wire Wire Line
 Wire Wire Line
 	6750 2750 6750 2850
 Wire Wire Line
-	6850 2550 6850 4450
+	6850 2550 6850 2800
 Wire Wire Line
 	6850 2800 6750 2800
 Connection ~ 6750 2800
-Connection ~ 4350 4450
 Wire Wire Line
 	2200 2300 2200 3750
 Wire Wire Line
@@ -687,7 +716,6 @@ Wire Wire Line
 Connection ~ 2650 3550
 Wire Wire Line
 	6850 2550 6650 2550
-Connection ~ 6850 2800
 Wire Wire Line
 	5600 2950 5600 900 
 Wire Wire Line
@@ -857,39 +885,12 @@ Connection ~ 6850 2700
 Wire Wire Line
 	3650 3400 3600 3400
 Connection ~ 3600 3400
-$Comp
-L GND #PWR030
-U 1 1 58BDE7DB
-P 3750 1350
-F 0 "#PWR030" H 3750 1100 50  0001 C CNN
-F 1 "GND" H 3755 1177 50  0000 C CNN
-F 2 "" H 3750 1350 50  0000 C CNN
-F 3 "" H 3750 1350 50  0000 C CNN
-	1    3750 1350
-	-1   0    0    1   
-$EndComp
-$Comp
-L GND #PWR031
-U 1 1 58BDE86A
-P 3750 1850
-F 0 "#PWR031" H 3750 1600 50  0001 C CNN
-F 1 "GND" H 3755 1677 50  0000 C CNN
-F 2 "" H 3750 1850 50  0000 C CNN
-F 3 "" H 3750 1850 50  0000 C CNN
-	1    3750 1850
-	1    0    0    -1  
-$EndComp
-$Comp
-L GND #PWR032
-U 1 1 58BDE8EE
-P 3350 1850
-F 0 "#PWR032" H 3350 1600 50  0001 C CNN
-F 1 "GND" H 3355 1677 50  0000 C CNN
-F 2 "" H 3350 1850 50  0000 C CNN
-F 3 "" H 3350 1850 50  0000 C CNN
-	1    3350 1850
-	1    0    0    -1  
-$EndComp
 Wire Wire Line
 	6100 2550 5950 2550
+Wire Wire Line
+	4350 4850 4350 4950
+Wire Wire Line
+	4150 3550 4150 4850
+Wire Wire Line
+	4150 4850 4350 4850
 $EndSCHEMATC

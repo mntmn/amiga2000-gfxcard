@@ -91,9 +91,9 @@ typedef volatile struct MNTVARegs {
   u16 capture_mode; // 4e
 
   u16 reserved_50; // 50
-  u16 capture_freq;
+  u16 capture_h; // 52
   u16 capture_porch;
-  u16 capture_shift; // 56
+  u16 capture_prex; // 56
 
   u16 row_pitch; // 58
   u16 reserved_5a;

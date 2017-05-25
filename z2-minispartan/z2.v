@@ -2,7 +2,7 @@
 // Company: MNT Media and Technology UG
 // Engineer: Lukas F. Hartmann (@mntmn)
 // Create Date:    21:49:19 03/22/2016 
-// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.4
+// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.5
 // Module Name:    z2
 // Target Devices: 
 
@@ -102,6 +102,33 @@ clk_wiz_v3_6 DCM(
   
   .CLK_OUT3(clk75_unbuffered),
   .CLK_OUT4(clk40_unbuffered)
+);
+
+reg dcm7_psen = 0;
+reg dcm7_psincdec = 0;
+reg dcm7_rst = 0;
+
+reg [7:0] dcm7_counter = 32;
+
+DCM_SP #(
+  .CLKIN_PERIOD(140.0),
+  .CLKOUT_PHASE_SHIFT("VARIABLE"),
+  .CLKFX_MULTIPLY(2),
+  .CLKDV_DIVIDE(2),
+  .PHASE_SHIFT(0),
+  .CLKFX_DIVIDE(1))
+dcm7 (
+  .CLKIN(zE7M),
+  .RST(dcm7_rst),
+  .CLKFB(dcm7_0),
+  .CLK0(dcm7_0),
+  .CLK90(dcm7_90),
+  .CLK180(dcm7_180),
+  .CLK270(dcm7_270),
+  .PSCLK(z_sample_clk),
+  .PSEN(dcm7_psen),
+  .PSINCDEC(dcm7_psincdec),
+  .PSDONE(dcm7_psdone)
 );
 
 reg [1:0] vga_clk_sel = 0;
@@ -339,8 +366,8 @@ assign zDIR4     = zDOE & (dataout_z3_latched); // a8-a15 <- input
 reg z_ready = 'b1;
 reg z_ready_latch = 'b1;
 reg z_ovr = 0;
-assign zXRDY  = 1'bZ; //z_ready_latch?1'bZ:1'b0; //works only if bZ?  1'bZ
-assign znCINH = !z_ovr; //1; // Z2 = /OVR
+assign zXRDY  = 1'bZ; //z_ovr?1'b0:1'bZ; //1'bZ; //z_ready_latch?1'bZ:1'b0; //works only if bZ?  1'bZ
+assign znCINH = z_ovr?1'b0:1'bZ; // Z2 = /OVR
 
 assign znSLAVEN = (/*dataout &&*/ slaven)?1'b0:1'b1;
 assign znDTACK  = dtack?1'b0:1'bZ;
@@ -364,8 +391,11 @@ reg [2:0] znDS1_sync = 3'b000;
 reg [2:0] znDS0_sync = 3'b000;
 reg [1:0] znRST_sync = 2'b11;
 reg [1:0] zDOE_sync = 2'b00;
-reg [1:0] zE7M_sync = 2'b00;
+reg [4:0] zE7M_sync = 5'b00000;
 reg [2:0] znCFGIN_sync = 3'b000;
+
+wire e7m_shifted1;
+assign e7m_shifted1 = zE7M_sync[2];
 
 reg [23:0] last_addr = 0;
 reg [23:0] last_read_addr = 0;
@@ -400,10 +430,10 @@ reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
 reg [1:0] counter_scale = 0;
 
-reg [15:0] REVISION = 'h0004;
+reg [15:0] REVISION = 'h0005;
 
 // memory map
-parameter reg_size = 32'h001000;
+parameter reg_size = 32'h01000;
 parameter autoconf_low  = 24'he80000;
 parameter autoconf_high = 24'he80080;
 reg [31:0] z3_ram_low = 32'h48000000; 
@@ -575,15 +605,8 @@ reg [15:0] videocap_buf2 [0:VCAPW];
 reg [15:0] videocap_rgbin = 0;
 reg [15:0] videocap_rgbin2 = 0;
 
-reg videocap_hires = 1;
-reg [9:0] videocap_resstat = 0;
-reg [9:0] videocap_hires_lines = 0;
-
-reg [7:0] videocap_thry = 10;
-reg [7:0] videocap_thrx = 10;
-
 // CAPTURE
-always @(posedge zE7M) begin
+always @(posedge dcm7_0 /*e7m_shifted1*/) begin
   videocap_hs <= {videocap_hs[8:0], videoHS};
   videocap_vs <= {videocap_vs[8:0], videoVS};
   
@@ -607,7 +630,7 @@ always @(posedge zE7M) begin
   end
 end
 
-always @(negedge zE7M) begin
+always @(posedge dcm7_180 /*e7m_shifted1*/) begin
   videocap_rgbin2 <= {videoR3,videoR2,videoR1,videoR0,videoR3, 
                     videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
                     videoB3,videoB2,videoB1,videoB0,videoB3};
@@ -631,7 +654,7 @@ always @(posedge z_sample_clk) begin
   znDS1_sync  <= {znDS1_sync[1:0],znDS1};
   znDS0_sync  <= {znDS0_sync[1:0],znDS0};
   zDOE_sync   <= {zDOE_sync[0],zDOE};
-  zE7M_sync   <= {zE7M_sync[0],zE7M};
+  zE7M_sync   <= {zE7M_sync[3:0],zE7M};
   znRST_sync  <= {znRST_sync[0],znRST};
   znCFGIN_sync  <= {znCFGIN_sync[1:0],znCFGIN};
   znFCS_sync <= {znFCS_sync[1:0],znFCS};
@@ -696,7 +719,7 @@ always @(posedge z_sample_clk) begin
     z3addr_in_ram <= 0;
   end
   
-  z3_mapped_addr <= ((z3addr)&'h01ffffff)>>1;
+  z3_mapped_addr <= (z3addr-z3_ram_low)>>1;
   
   datastrobe_synced <= (znUDS_sync==0 || znLDS_sync==0);
   z2_uds <= (znUDS_sync==0);
@@ -764,7 +787,6 @@ reg blitter_dirx = 0;
 reg blitter_diry = 0;
 
 reg [4:0] dtack_time = 0;
-reg [15:0] warmup_counter = 0; // 2 seconds @ 150mhz
 reg [5:0] dvid_reset_counter = 0;
 reg z2_addr_valid = 0;
 reg z3_end_cycle = 0;
@@ -796,6 +818,8 @@ reg [15:0] default_data = 'hffff; // causes read/write glitches on A2000 (data b
 always @(posedge z_sample_clk) begin
 
   screen_w_with_margin <= (screen_w+margin_x);
+  if (dcm7_psen==1'b1) dcm7_psen <= 1'b0;
+  if (dcm7_rst==1'b1) dcm7_rst <= 1'b0;
 
 `ifdef ANALYZER
   if (rec_enable) begin
@@ -857,11 +881,10 @@ always @(posedge z_sample_clk) begin
       slaven <= 0;
       z_ready <= 1; // clear XRDY (cpu wait)
       zorro_ram_read_done <= 1;
-      warmup_counter <= 0;
       sdram_reset <= 1;
       z_ovr <= 0;
       
-      blitter_base <= 'hf89c00;
+      blitter_base <= 'hf89c00; // capture vertical offset
       pan_ptr <= 'hf89c00; // capture vertical offset
       burst_enabled <= 1;
       margin_x <= 10;
@@ -980,9 +1003,6 @@ always @(posedge z_sample_clk) begin
         dtack_time <= 0;
         if (z3_confdone) begin
           zorro_state <= CONFIGURED;
-          ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
-          reg_low   <= z3_ram_low + z3_ram_size-'h10000;
-          reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;
         end else
           zorro_state <= Z3_CONFIGURING;
       end else
@@ -1000,7 +1020,7 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           
           case (zaddr_sync2[7:0])
-            8'h00: data <= 'b1100_1111_1111_1111; // zorro 2
+            8'h00: data <= 'b1101_1111_1111_1111; // zorro 2 (11), no pool (0) no rom (0)
             8'h02: data <= 'b0111_1111_1111_1111; // next board unrelated (0), 4mb
             
             8'h04: data <= 'b1111_1111_1111_1111; // product number
@@ -1022,6 +1042,11 @@ always @(posedge z_sample_clk) begin
             8'h22: data <= 'b1110_1111_1111_1111; //
             8'h24: data <= 'b1111_1111_1111_1111; //
             8'h26: data <= 'b1110_1111_1111_1111; //
+            
+            /*8'h28: data <= 'b1111_1111_1111_1111; // autoboot rom vector (er_InitDiagVec)
+            8'h2a: data <= 'b1111_1111_1111_1111; // ff7f = ~0080
+            8'h2c: data <= 'b0111_1111_1111_1111;
+            8'h2e: data <= 'b1111_1111_1111_1111;*/
             
             //'h000040: data <= 'b0000_0000_0000_0000; // interrupts (not inverted)
             //'h000042: data <= 'b0000_0000_0000_0000; //
@@ -1066,13 +1091,24 @@ always @(posedge z_sample_clk) begin
     end
     
     CONFIGURED: begin
-      ram_high  <= ram_low + ram_size-'h10000-4;
+      /*ram_high  <= ram_low + ram_size-'h10000-4;
       reg_low   <= ram_low + ram_size-'h10000;
-      reg_high  <= ram_low + ram_size-'h10000 + reg_size;
+      reg_high  <= ram_low + ram_size-'h10000 + reg_size;*/
       
-      z3_ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
+      // experimental autoboot layout
+      ram_low <= ram_low + 'h10000;
+      ram_high <= ram_low + ram_size;
+      reg_low <= ram_low;
+      reg_high <= ram_low + reg_size;
+      
+      z3_ram_low   <= z3_ram_low + 'h10000;
+      z3_ram_high  <= z3_ram_low + z3_ram_size;
+      z3_reg_low   <= z3_ram_low;
+      z3_reg_high  <= z3_ram_low + reg_size;
+      
+      /*z3_ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
       z3_reg_low   <= z3_ram_low + z3_ram_size-'h10000;
-      z3_reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;
+      z3_reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;*/
       
       z_confout <= 1;
       
@@ -1148,7 +1184,7 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           z_ovr <= 1;
           
-          case (zaddr_sync2[7:0])
+          case (zaddr_sync2[8:0]) // 9bit
             'h20: data <= blitter_x1;
             'h22: data <= blitter_y1;
             'h24: data <= blitter_x2;
@@ -1165,6 +1201,83 @@ always @(posedge z_sample_clk) begin
             'h6c: data <= {sd_data_in,8'h00};
             'h6e: data <= {sd_data_out_sync,8'h00};
             'h70: data <= sd_error_sync;
+            
+            /*
+            // autoboot rom stuff (coming in 1.6)
+            // http://amigadev.elowar.com/read/ADCD_2.1/Libraries_Manual_guide/node041C.html
+            'h80: data <= 'h9000; // WORDWIDE+CONFIGTIME Everything relative to here
+            'h82: data <= 'h0088; // DAsize
+            'h84: data <= 'h0036; // DiagPt: 0xb6
+            'h86: data <= 'h0036; // BootPt
+            'h88: data <= 'h0028; // DevName pointer
+            'h8a: data <= 'h0000; // Res
+            'h8c: data <= 'h0000; // Res
+            'h8e: data <= 'h4afc; // ROMTAG
+            'h90: data <= 'h0000; // Backptr
+            'h92: data <= 'h000e; // Backptr
+            'h94: data <= 'h0000; // 
+            'h96: data <= 'h0088; // Endskip
+            'h98: data <= 'h0101; // Coldstart, Version
+            'h9a: data <= 'h0314; // NT_DEVICE, Priority $14
+            'h9c: data <= 'h0000; // 
+            'h9e: data <= 'h0028; // DevName pointer
+            'ha0: data <= 'h0000; // 
+            'ha2: data <= 'h0028; // IDString pointer
+            'ha4: data <= 'h0000; // 
+            'ha6: data <= 'h0116; // InitEntry pointer
+            'ha8: data <= 'h6d6e; // DevName mntsd.device
+            'haa: data <= 'h7473; // -- DevName
+            'hac: data <= 'h642e; // -- DevName
+            'hae: data <= 'h6465; // -- DevName
+            'hb0: data <= 'h7669; // -- DevName
+            'hb2: data <= 'h6365; // DevName
+            'hb4: data <= 'h0000; //
+            
+            'hb6: data <= 'h7000; // diagentry
+            'hb8: data <= 'h2848;
+            'hba: data <= 'hd9fc;
+            'hbc: data <= 'h0001;
+            'hbe: data <= 'h0000;
+            'hc0: data <= 'h317c;
+            'hc2: data <= 'h0000;
+            'hc4: data <= 'h0068;
+            'hc6: data <= 'h223c;
+            'hc8: data <= 'h0000;
+            'hca: data <= 'h0201;
+            
+            'hcc: data <= 'h3140; // read
+            'hce: data <= 'h006a;
+            'hd0: data <= 'h317c;
+            'hd2: data <= 'hffff;
+            'hd4: data <= 'h0062;
+            
+            'hd6: data <= 'h4a68; // blockloop
+            'hd8: data <= 'h0060;
+            'hda: data <= 'h6700;
+            'hdc: data <= 'hfffa;
+            
+            'hde: data <= 'h4a68; // shakea
+            'he0: data <= 'h0066;
+            'he2: data <= 'h6700;
+            'he4: data <= 'hfffa;
+            'he6: data <= 'h1428;
+            'he8: data <= 'h006e;
+            'hea: data <= 'h18c2;
+            'hec: data <= 'h317c;
+            'hee: data <= 'hffff;
+            'hf0: data <= 'h0066;
+            
+            'hf2: data <= 'h4a68; // shakeb
+            'hf4: data <= 'h0066;
+            'hf6: data <= 'h6600;
+            'hf8: data <= 'hfffa;
+            'hfa: data <= 'h317c;
+            'hfc: data <= 'h0000;
+            'hfe: data <= 'h0066;
+            'h100: data <= 'h51c9;
+            'h102: data <= 'hffd4;
+            'h104: data <= 'h7001;
+            'h106: data <= 'h4e75;*/
             
             default: data <= REVISION;
           endcase
@@ -1463,7 +1576,7 @@ always @(posedge z_sample_clk) begin
               
         'h28: begin z3_regread_hi <= blitter_rgb;
               z3_regread_lo <= blitter_enable; end // 'h2a
-        
+
         'h60: begin z3_regread_hi <= {sd_busy_sync,8'h00};
               z3_regread_lo <= {sd_read,8'h00}; end // 'h62
         'h64: begin z3_regread_hi <= {sd_write,8'h00};
@@ -1473,16 +1586,8 @@ always @(posedge z_sample_clk) begin
         'h6c: begin z3_regread_hi <= {sd_data_in,8'h00};
               z3_regread_lo <= {sd_data_out_sync,8'h00}; end // 'h6e
         
-        'h70: begin z3_regread_hi <= sd_error_sync; z3_regread_lo <= 0; end
-     
-`ifdef TRACE
-        'h80: begin z3_regread_hi <= trace_1[31:16]; z3_regread_lo <= trace_1[15:0]; end
-        'h84: begin z3_regread_hi <= trace_2[31:16]; z3_regread_lo <= trace_2[15:0]; end
-        'h88: begin z3_regread_hi <= trace_3[31:16]; z3_regread_lo <= trace_3[15:0]; end
-        'h8c: begin z3_regread_hi <= trace_4[15:0]; z3_regread_lo <= 0; end
-        'h90: begin z3_regread_hi <= trace_5[31:16]; z3_regread_lo <= trace_5[15:0]; end
-        'h94: begin z3_regread_hi <= trace_6[31:16]; z3_regread_lo <= trace_6[15:0]; end
-`endif
+        'h70: begin z3_regread_hi <= sd_error_sync; 
+              z3_regread_lo <= 0; end
 
         default: begin
           z3_regread_hi <= REVISION; //'h0000; 
@@ -1576,10 +1681,15 @@ always @(posedge z_sample_clk) begin
         'h46: blitter_colormode <= regdata_in[2:0];
         'h48: colormode <= regdata_in[2:0];
         
-        'h4a: videocap_thry <= regdata_in[7:0];
+        'h4a: begin
+          dcm7_psincdec <= regdata_in[0];
+          dcm7_psen <= 1'b1;
+        end
+        
+        'h4c: dcm7_rst <= 1'b1;
+        
         'h4e: videocap_mode <= regdata_in[0];
         
-        'h50: videocap_thrx <= regdata_in[7:0];
         'h52: videocap_height <= regdata_in[8:0];
         'h54: videocap_porch <= regdata_in[7:0];
         'h56: videocap_prex <= regdata_in[9:0];
