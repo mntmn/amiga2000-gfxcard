@@ -115,6 +115,8 @@ DCM_SP #(
   .CLKOUT_PHASE_SHIFT("VARIABLE"),
   .CLKFX_MULTIPLY(2),
   .CLKDV_DIVIDE(2),
+  // -16, -4 perfect on A2000
+  // 16 perfect on A3000
   .PHASE_SHIFT(0),
   .CLKFX_DIVIDE(1))
 dcm7 (
@@ -363,10 +365,8 @@ assign zDIR2     = zDOE & ((dataout_enable | dataout_z3_latched)); // d10-15, d0
 assign zDIR3     = zDOE & (dataout_z3_latched); // a16-a23 <- input
 assign zDIR4     = zDOE & (dataout_z3_latched); // a8-a15 <- input
 
-reg z_ready = 'b1;
-reg z_ready_latch = 'b1;
 reg z_ovr = 0;
-assign zXRDY  = 1'bZ; //z_ovr?1'b0:1'bZ; //1'bZ; //z_ready_latch?1'bZ:1'b0; //works only if bZ?  1'bZ
+assign zXRDY  = 1'bZ;
 assign znCINH = z_ovr?1'b0:1'bZ; // Z2 = /OVR
 
 assign znSLAVEN = (/*dataout &&*/ slaven)?1'b0:1'b1;
@@ -430,7 +430,7 @@ reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
 reg [1:0] counter_scale = 0;
 
-reg [15:0] REVISION = 'h0005;
+reg [15:0] REVISION = 'h0006;
 
 // memory map
 parameter reg_size = 32'h01000;
@@ -455,14 +455,13 @@ reg [7:0] datain_counter = 0;
 
 reg [4:0] margin_x = 8; // CHECK was 9
 reg [10:0] safe_x1 = 0;
-//reg [10:0] safe_x2 = 'h60;
 parameter safe_x2 = 'h60;
 
 // blitter registers
-reg [11:0] blitter_x1 = 0;     // 20
-reg [11:0] blitter_y1 = 0;     // 22
-reg [11:0] blitter_x2 = 0;  // 24
-reg [11:0] blitter_y2 = 0;   // 26
+reg [11:0] blitter_x1 = 0; // 20
+reg [11:0] blitter_y1 = 0; // 22
+reg [11:0] blitter_x2 = 0; // 24
+reg [11:0] blitter_y2 = 0; // 26
 reg [11:0] blitter_x3 = 0; // 2c
 reg [11:0] blitter_y3 = 0; // 2e
 reg [11:0] blitter_x4 = 'h100; // 30
@@ -521,7 +520,9 @@ parameter RESET_DVID = 29;
 parameter Z2_PRE_CONFIGURED = 30;
 parameter Z2_ENDCYCLE = 31;
 
-reg [6:0] zorro_state = RESET;
+parameter COLD = 33;
+
+reg [6:0] zorro_state = COLD;
 reg zorro_read = 0;
 reg zorro_write = 0;
 reg z2_read = 0;
@@ -574,8 +575,8 @@ reg [9:0] videocap_x = 0;
 reg [9:0] videocap_x2 = 0;
 reg [9:0] videocap_y = 0;
 reg [9:0] videocap_y2 = 0;
+reg [9:0] videocap_ymax = 0;
 reg [9:0] videocap_y3 = 0;
-reg [9:0] videocap_y4 = 0;
 reg [23:0] videocap_addr = 0;
 reg [15:0] videocap_data = 0;
 reg [7:0] videocap_porch = 'h28;
@@ -589,10 +590,17 @@ reg [9:0] videocap_line_saved_y = 0;
 reg  [23:0] videocap_save_next_addr = 0;
 reg videocap_line_saved = 0;
 
+reg [15:0] videocap_rgbin = 0;
+reg [15:0] videocap_rgbin2 = 0;
+reg [9:0]  videocap_default_w = 640;
+reg [9:0]  videocap_default_h = 480;
+reg [6:0]  videocap_voffset = 40;
+reg [9:0] videocap_prex = 'h41;
+reg [8:0] videocap_height = 'h117; // 'h127;
+reg [8:0] videocap_width = 320;
+
 reg [7:0] vscount = 0;
 reg [7:0] vsmax = 0;
-reg [9:0] videocap_prex = 'h41;
-reg [8:0] videocap_height = 'h117;
 reg vsynced = 0;
 
 reg vcbuf=0;
@@ -602,11 +610,9 @@ parameter VCAPW = 399;
 reg [15:0] videocap_buf [0:VCAPW];
 reg [15:0] videocap_buf2 [0:VCAPW];
 
-reg [15:0] videocap_rgbin = 0;
-reg [15:0] videocap_rgbin2 = 0;
 
-// CAPTURE
-always @(posedge dcm7_0 /*e7m_shifted1*/) begin
+// VIDEO CAPTURE
+always @(posedge dcm7_0) begin
   videocap_hs <= {videocap_hs[8:0], videoHS};
   videocap_vs <= {videocap_vs[8:0], videoVS};
   
@@ -618,6 +624,7 @@ always @(posedge dcm7_0 /*e7m_shifted1*/) begin
     // do nothing
   end else if (videocap_vs[6:1]=='b000111) begin
     videocap_y2 <= 0;
+    videocap_ymax <= {videocap_y2,1'b0}-{videocap_voffset,1'b0};
   end else if (videocap_hs[6:1]=='b000111) begin
     videocap_x <= 0;
     if (videocap_y2>videocap_height) begin
@@ -630,7 +637,7 @@ always @(posedge dcm7_0 /*e7m_shifted1*/) begin
   end
 end
 
-always @(posedge dcm7_180 /*e7m_shifted1*/) begin
+always @(posedge dcm7_180) begin
   videocap_rgbin2 <= {videoR3,videoR2,videoR1,videoR0,videoR3, 
                     videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
                     videoB3,videoB2,videoB1,videoB0,videoB3};
@@ -664,8 +671,6 @@ always @(posedge z_sample_clk) begin
   data_in <= zD;
   data_in_z3_low16 <= zA[22:7]; // FIXME why sample this twice?
   zdata_in_sync <= data_in;
-    
-  z_ready_latch <= z_ready; // timing fix
   
   //if (znUDS_sync==3'b000 || znLDS_sync==3'b000 || znDS1_sync==3'b000 || znDS0_sync==3'b000)
   if (znUDS_sync[1]==0 || znLDS_sync[1]==0 || znDS1_sync[1]==0 || znDS0_sync[1]==0)
@@ -815,6 +820,8 @@ reg [15:0] zorro_write_capture_data = 0;
 
 reg [15:0] default_data = 'hffff; // causes read/write glitches on A2000 (data bus interference) when 0
 
+reg [31:0] coldstart_counter = 0;
+
 always @(posedge z_sample_clk) begin
 
   screen_w_with_margin <= (screen_w+margin_x);
@@ -843,22 +850,26 @@ always @(posedge z_sample_clk) begin
   end
 `endif
 
-  if (z_cfgin_lo || z_reset) begin
+  if (zorro_state!=COLD && (z_cfgin_lo || z_reset)) begin
     zorro_state <= RESET;
   end else
   case (zorro_state)
+    COLD: begin
+      zorro_state <= RESET;
+    end
+
     RESET: begin
       vga_clk_sel  <= 1;
       
       // new default mode is 640x480 wrapped in 800x600@60hz
-      screen_w     <= 'h280;
-      h_rez        <= 640;
+      screen_w     <= videocap_default_w;
+      h_rez        <= videocap_default_w;
       h_sync_start <= 832;
       h_sync_end   <= 896;
       h_max        <= 1048;
       
-      screen_h     <= 480;
-      v_rez        <= 480;
+      screen_h     <= videocap_default_h;
+      v_rez        <= videocap_default_h;
       v_sync_start <= 601;
       v_sync_end   <= 604;
       v_max        <= 631;
@@ -869,23 +880,13 @@ always @(posedge z_sample_clk) begin
       videocap_mode <= 0;
       dvid_reset <= 1;
       
-      z_confout <= 0;
-      z3_confdone <= 0;
-      
       scalemode_h <= 0;
       scalemode_v <= 1;
       colormode <= 1;
       blitter_colormode <= 1;
-      dataout_enable <= 0;
-      dataout <= 0;
-      slaven <= 0;
-      z_ready <= 1; // clear XRDY (cpu wait)
-      zorro_ram_read_done <= 1;
-      sdram_reset <= 1;
-      z_ovr <= 0;
       
-      blitter_base <= 'hf89c00; // capture vertical offset
-      pan_ptr <= 'hf89c00; // capture vertical offset
+      blitter_base <= 'hf80000+(videocap_voffset<<10); // capture vertical offset
+      pan_ptr <= 'hf80000+(videocap_voffset<<10); // capture vertical offset
       burst_enabled <= 1;
       margin_x <= 10;
       preheat_x <= 1;
@@ -905,8 +906,16 @@ always @(posedge z_sample_clk) begin
       reg_low   <= 'h600000 + ram_size;
       reg_high  <= 'h600000 + ram_size + reg_size;
       
-      //if (clock_locked /*&& znRST_sync[1] == 1'b1*/)
-        zorro_state <= DECIDE_Z2_Z3;
+      sdram_reset <= 1;
+      dataout_enable <= 0;
+      dataout <= 0;
+      slaven <= 0;
+      zorro_ram_read_done <= 1;
+      z_ovr <= 0;
+      z_confout <= 0;
+      z3_confdone <= 0;
+
+      zorro_state <= DECIDE_Z2_Z3;
     end
     
     DECIDE_Z2_Z3: begin
@@ -1091,11 +1100,6 @@ always @(posedge z_sample_clk) begin
     end
     
     CONFIGURED: begin
-      /*ram_high  <= ram_low + ram_size-'h10000-4;
-      reg_low   <= ram_low + ram_size-'h10000;
-      reg_high  <= ram_low + ram_size-'h10000 + reg_size;*/
-      
-      // experimental autoboot layout
       ram_low <= ram_low + 'h10000;
       ram_high <= ram_low + ram_size;
       reg_low <= ram_low;
@@ -1106,15 +1110,11 @@ always @(posedge z_sample_clk) begin
       z3_reg_low   <= z3_ram_low;
       z3_reg_high  <= z3_ram_low + reg_size;
       
-      /*z3_ram_high  <= z3_ram_low + z3_ram_size-'h10000-4;
-      z3_reg_low   <= z3_ram_low + z3_ram_size-'h10000;
-      z3_reg_high  <= z3_ram_low + z3_ram_size-'h10000 + reg_size;*/
-      
       z_confout <= 1;
       
       sdram_reset <= 0;
       blitter_enable <= 1;
-      blitter_rgb <= 'h0000;
+      blitter_rgb <= 'hffff;
       
       zorro_state <= CONFIGURED_CLEAR;
     end
@@ -1184,26 +1184,25 @@ always @(posedge z_sample_clk) begin
           slaven <= 1;
           z_ovr <= 1;
           
+          // REGREAD_Z2
           case (zaddr_sync2[8:0]) // 9bit
-            'h20: data <= blitter_x1;
-            'h22: data <= blitter_y1;
-            'h24: data <= blitter_x2;
-            'h26: data <= blitter_y2;
-            'h28: data <= blitter_rgb;
             'h2a: data <= blitter_enable;
             
+            'h54: data <= videocap_default_w;
+            'h56: data <= videocap_default_h;
+            
             'h60: data <= {sd_busy_sync,8'h00};
-            'h62: data <= {sd_read,8'h00};
-            'h64: data <= {sd_write,8'h00};
+            //'h62: data <= {sd_read,8'h00};
+            //'h64: data <= {sd_write,8'h00};
             'h66: data <= {sd_handshake_out_sync,8'h00};
-            'h68: data <= sd_addr_in[31:16];
-            'h6a: data <= sd_addr_in[15:0];
-            'h6c: data <= {sd_data_in,8'h00};
+            //'h68: data <= sd_addr_in[31:16];
+            //'h6a: data <= sd_addr_in[15:0];
+            //'h6c: data <= {sd_data_in,8'h00};
             'h6e: data <= {sd_data_out_sync,8'h00};
             'h70: data <= sd_error_sync;
             
             /*
-            // autoboot rom stuff (coming in 1.6)
+            // autoboot rom stuff (coming in 1.7)
             // http://amigadev.elowar.com/read/ADCD_2.1/Libraries_Manual_guide/node041C.html
             'h80: data <= 'h9000; // WORDWIDE+CONFIGTIME Everything relative to here
             'h82: data <= 'h0088; // DAsize
@@ -1568,23 +1567,20 @@ always @(posedge z_sample_clk) begin
       zorro_state <= REGREAD_POST;
       
       case (zaddr_regpart)
-        /*'h20: begin z3_regread_hi <= blitter_x1;
-              z3_regread_lo <= blitter_y1; end // 'h22
-              
-        'h24: begin z3_regread_hi <= blitter_x2;
-              z3_regread_lo <= blitter_y2; end // 'h26*/
-              
         'h28: begin z3_regread_hi <= blitter_rgb;
               z3_regread_lo <= blitter_enable; end // 'h2a
-
+              
+        'h54: begin z3_regread_hi <= videocap_default_w;
+              z3_regread_lo <= videocap_default_h; end // 'h56
+              
         'h60: begin z3_regread_hi <= {sd_busy_sync,8'h00};
               z3_regread_lo <= {sd_read,8'h00}; end // 'h62
-        'h64: begin z3_regread_hi <= {sd_write,8'h00};
+        /*'h64: begin z3_regread_hi <= {sd_write,8'h00};
               z3_regread_lo <= {sd_handshake_out_sync,8'h00}; end // 'h66
         'h68: begin z3_regread_hi <= sd_addr_in[31:16];
               z3_regread_lo <= sd_addr_in[15:0]; end // 'h6a
         'h6c: begin z3_regread_hi <= {sd_data_in,8'h00};
-              z3_regread_lo <= {sd_data_out_sync,8'h00}; end // 'h6e
+              z3_regread_lo <= {sd_data_out_sync,8'h00}; end // 'h6e*/
         
         'h70: begin z3_regread_hi <= sd_error_sync; 
               z3_regread_lo <= 0; end
@@ -1622,17 +1618,6 @@ always @(posedge z_sample_clk) begin
         'h08: begin
           screen_h <= regdata_in[11:0];
           v_rez    <= regdata_in[11:0];
-        end
-        
-        'h70: h_sync_start <= regdata_in[11:0];
-        'h72: h_sync_end <= regdata_in[11:0];
-        'h74: h_max <= regdata_in[11:0];
-        'h76: v_sync_start <= regdata_in[11:0];
-        'h78: v_sync_end <= regdata_in[11:0];
-        'h7a: v_max <= regdata_in[11:0];
-        'h7c: begin 
-          vga_clk_sel <= regdata_in[1:0];
-          dvid_reset <= 1;
         end
         
         'h0a: dataout_time <= regdata_in[7:0];
@@ -1675,7 +1660,10 @@ always @(posedge z_sample_clk) begin
         
         'h38: pan_ptr[23:16] <= regdata_in[7:0];
         'h3a: pan_ptr[15:0]  <= regdata_in;
-
+        
+        'h3c: videocap_prex <= regdata_in[9:0];
+        'h3e: videocap_voffset <= regdata_in[6:0];
+        
         'h42: blitter_row_pitch <= regdata_in;
         'h44: blitter_row_pitch_shift <= regdata_in[4:0];
         'h46: blitter_colormode <= regdata_in[2:0];
@@ -1685,14 +1673,13 @@ always @(posedge z_sample_clk) begin
           dcm7_psincdec <= regdata_in[0];
           dcm7_psen <= 1'b1;
         end
-        
         'h4c: dcm7_rst <= 1'b1;
         
         'h4e: videocap_mode <= regdata_in[0];
-        
+        'h50: videocap_width <= regdata_in[8:0];
         'h52: videocap_height <= regdata_in[8:0];
-        'h54: videocap_porch <= regdata_in[7:0];
-        'h56: videocap_prex <= regdata_in[9:0];
+        'h54: videocap_default_w <= regdata_in[9:0];
+        'h56: videocap_default_h <= regdata_in[9:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
@@ -1705,6 +1692,17 @@ always @(posedge z_sample_clk) begin
         'h68: sd_addr_in[31:16] <= regdata_in[15:0];
         'h6a: sd_addr_in[15:0] <= regdata_in[15:0];
         'h6c: sd_data_in <= regdata_in[15:8];
+        
+        'h70: h_sync_start <= regdata_in[11:0];
+        'h72: h_sync_end <= regdata_in[11:0];
+        'h74: h_max <= regdata_in[11:0];
+        'h76: v_sync_start <= regdata_in[11:0];
+        'h78: v_sync_end <= regdata_in[11:0];
+        'h7a: v_max <= regdata_in[11:0];
+        'h7c: begin
+          vga_clk_sel <= regdata_in[1:0];
+          dvid_reset <= 1;
+        end
       
 `ifdef TRACE      
         'h80: begin
@@ -1728,7 +1726,7 @@ always @(posedge z_sample_clk) begin
   x_safe_area_sync <= {x_safe_area_sync[0], x_safe_area};
 
   if (videocap_mode && blitter_enable==0) begin
-    if (videocap_line_saved_y!=videocap_y3 && videocap_line_saved==1) begin
+    if (videocap_y3>=videocap_voffset && videocap_line_saved_y!=videocap_y3 && videocap_line_saved==1) begin
       videocap_line_saved <= 0;
       videocap_line_saved_y <= videocap_y2;
       videocap_save_x <= 0;
@@ -1888,7 +1886,7 @@ always @(posedge z_sample_clk) begin
         ram_data_in <= videocap_buf2[videocap_save_x];
         ram_data_in_next <= videocap_buf[videocap_save_x];
           
-        if (videocap_save_x<320) begin
+        if (videocap_save_x<videocap_width) begin
           videocap_save_x  <= videocap_save_x  + 1'b1;
           videocap_save_x2 <= videocap_save_x2  + 2'b10;
         end else begin
@@ -2064,7 +2062,10 @@ always @(posedge vga_clk) begin
   vga_preheat_x <= preheat_x;
   vga_h_max <= h_max;
   vga_v_max <= v_max;
-  vga_screen_h <= screen_h;
+  if (videocap_mode)
+    vga_screen_h <= videocap_ymax;
+  else
+    vga_screen_h <= screen_h;
   vga_h_rez <= h_rez;
   vga_v_rez <= v_rez;
   vga_h_sync_start <= h_sync_start;
