@@ -1,11 +1,11 @@
 /* ConfigDev passed in a3 */
 /*
   struct ConfigDev {
-    struct Node		cd_Node; // 0  2ptr,2byte,1ptr = 14byte
-    UBYTE		cd_Flags; // 14
-    UBYTE		cd_Pad; // 15
-    struct ExpansionRom	cd_Rom; // 16   16bytes
-    APTR		cd_BoardAddr; // 32
+    struct Node   cd_Node; // 0  2ptr,2byte,1ptr = 14byte
+    UBYTE   cd_Flags; // 14
+    UBYTE   cd_Pad; // 15
+    struct ExpansionRom cd_Rom; // 16   16bytes
+    APTR    cd_BoardAddr; // 32
     ...
 */
 .set SysBase,4
@@ -72,11 +72,11 @@ realstart:
   /*move.l  32(a3), a0 */
   move.l a0,-(a7)  /* save board address */
 
-  movea.l	SysBase,a6 /* allocate RAM for loading ourselves to */
+  movea.l SysBase,a6 /* allocate RAM for loading ourselves to */
   move.l #0x40000,d0
   moveq #0,d1 /* MEMF_ANY */
   jsr AllocMem(a6)
-  tst.l	d0
+  tst.l d0
   beq allocfail
   
   move.l d0, a4 /* load addr */
@@ -98,7 +98,7 @@ allocfail:
   /* a0 contains board addr, a3 contains configdev addr */
 .align 4
 trampoline:
-	lea	configdev(pc),a1
+  lea configdev(pc),a1
   move.l a3,(a1) /* store configdev pointer */
 
   move.w #1, 0x4e(a0) /* activate video capture that was switched off in ROM */
@@ -120,7 +120,7 @@ trampoline:
   move.l  4,a6
   jsr     -102(a6) /* InitResident */
   /* object = InitResident(resident, segList) */
-	/* D0	                   A1        D1 */
+  /* D0                    A1        D1 */
   
   /* make dos node --------------------- */
   
@@ -154,7 +154,7 @@ segtprs:
 relocstart:
   lea.l  segptrs(pc), a1
   
-	move.l 8(a0), d4 /* number of hunks */
+  move.l 8(a0), d4 /* number of hunks */
   move.l #0, d5
 
   /*
@@ -168,17 +168,17 @@ relocstart:
   */
 
   /* hunk 0 address in memory */
-	move.l a0, d6
+  move.l a0, d6
   add.l  #0x24, d6
-	move.l d6, a2 /* addr of first hunk */
+  move.l d6, a2 /* addr of first hunk */
   move.l d6, (a1) /* store pointer to this hunk in segptrs[1] */
 
 relocpass:
-	move.l a2, a3
-	move.l 0x14(a0), d0 /* ptr to first hunk size */
+  move.l a2, a3
+  move.l 0x14(a0), d0 /* ptr to first hunk size */
   
-	lsl.l  #2, d0 /* firsthunk + first size */
-	add.l  d0, a3 /* end of first hunk, start of reloc table */
+  lsl.l  #2, d0 /* firsthunk + first size */
+  add.l  d0, a3 /* end of first hunk, start of reloc table */
 
   jsr  reloctables(pc)
 
@@ -198,7 +198,7 @@ relocpass:
 
   /* start pass 1 */
   move.l #1, d5
-	move.l a2, d6 /* addr of first hunk */
+  move.l a2, d6 /* addr of first hunk */
   bra relocpass
 
 rcomplete:
@@ -208,10 +208,10 @@ rcomplete:
 reloctables:
   move.l (a3)+, d2 /* skip 0000 03ec marker */
 reloctable:
-	move.l (a3)+, d2 /* number of relocs to process */
+  move.l (a3)+, d2 /* number of relocs to process */
 
   tst.w  d2
-	beq    relocdone /* done if zero */
+  beq    relocdone /* done if zero */
   
   move.l (a3)+, d1  /* segment number to point to */
 
@@ -231,7 +231,7 @@ relocloop:
   
   move.l d1, 0xdff180
 rloop:
-	dbra   d2, relocloop
+  dbra   d2, relocloop
   jmp reloctable(pc)
 relocdone:
   rts
@@ -244,7 +244,7 @@ printf:
   lea.l fmtnum(pc),a1
   move.l d2,(a1)
   move.l a1, d2
-	jsr	VPrintf(a6)
+  jsr VPrintf(a6)
   move.l (a7)+,a6
   rts
   
