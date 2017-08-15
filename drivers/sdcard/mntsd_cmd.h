@@ -1,6 +1,17 @@
+#ifndef MNTSD_H
+#define MNTSD_H
+
 #define uint32 unsigned long
 #define uint8 unsigned char
 #define uint16 unsigned short
+
+#define SD_HEADS         1
+#define SD_CYLS          1024 /* 1024 MB */
+#define SD_TRACK_SECTORS 2048 /* 1 MB */
+#define SD_CYL_SECTORS   2048 /* TRACK_SECTORS * HEADS */
+#define SD_SECTOR_BYTES  512
+#define SD_SECTOR_SHIFT  9
+#define SD_RETRY         10
 
 #define SDERRF_TIMEOUT  (1 << 7)
 #define SDERRF_PARAM    (1 << 6)
@@ -15,64 +26,78 @@
 
 #define SDU_STACK_SIZE  (4096 / sizeof(ULONG))
 
-struct sdcmd {
-  struct Node *owner; /* Owner of this structure */
+#define CMD_NAME(x) if (cmd == x) return #x
+#define TD_READ64     24
+#define TD_WRITE64    25
+#define TD_SEEK64     26
+#define TD_FORMAT64   27
 
-  ULONG iobase;
+/*const char *cmd_name(int cmd)
+{
+  CMD_NAME(CMD_READ);
+  CMD_NAME(CMD_WRITE);
+  CMD_NAME(CMD_UPDATE);
+  CMD_NAME(CMD_CLEAR);
+  CMD_NAME(TD_ADDCHANGEINT);
+  CMD_NAME(TD_CHANGENUM);
+  CMD_NAME(TD_CHANGESTATE);
+  CMD_NAME(TD_EJECT);
+  CMD_NAME(TD_FORMAT);
+  CMD_NAME(TD_GETDRIVETYPE);
+  CMD_NAME(TD_GETGEOMETRY);
+  CMD_NAME(TD_MOTOR);
+  CMD_NAME(TD_PROTSTATUS);
+  CMD_NAME(TD_READ64);
+  CMD_NAME(TD_REMCHANGEINT);
+  CMD_NAME(TD_WRITE64);
+  CMD_NAME(HD_SCSICMD);
 
-  struct sdcmd_retry {
-    LONG read;      /* Number of retries to read a block */
-    LONG write;     /* Number of retries to write a block */
-  } retry;
+  return "Unknown";
+  }*/
 
-  struct sdcmd_info {
-    /* Raw OCR, CSD and CID data */
-    ULONG ocr;
-    UBYTE csd[16];
-    UBYTE cid[16];
-
-    /* Disk-like interface */
-    ULONG block_size;
-    ULONG blocks;
-    BOOL  read_only;
-
-    /* Conversion from block to SD address */
-    UBYTE addr_shift;
-  } info;
-
-  /** Functions to be provided by the caller **/
-  struct sdcmd_func {
-    /* Add to the debug log.
-     */
-//        VOID (*log)(struct sdcmd *sd, int level, const char *format, ...);
-  } func;
+struct MNTSDRegs {
+  volatile uint16 busy; // 60 also reset
+  volatile uint16 read; // 62
+  volatile uint16 write; // 64
+  volatile uint16 handshake; // 66
+  volatile uint16 addr_hi; // 68
+  volatile uint16 addr_lo; // 6a
+  volatile uint16 data_in; // 6c
+  volatile uint16 data_out; // 6e data in upper byte!
+  volatile uint16 err; // 70
 };
 
 struct SDBase {
-  struct Device*      sd_Device;
-  struct Library*     sd_ExecBase;
-  APTR                sd_SegList;
+  struct Device* sd_Device;
   struct SDUnit {
     struct Unit sdu_Unit;
-    struct Task sdu_Task;
-    TEXT        sdu_Name[6];                /* "SDIOx" */
-    ULONG       sdu_Stack[SDU_STACK_SIZE];          /* 4K stack */
+
+    /*struct Unit {
+        struct  MsgPort unit_MsgPort;
+        UBYTE   unit_flags;
+                UNITF_ACTIVE = 1
+                UNITF_INTASK = 2 
+        UBYTE   unit_pad;
+        UWORD   unit_OpenCnt;
+    };*/
+    
     BOOL        sdu_Enabled;
 
-    struct sdcmd sdu_SDCmd;
-    struct MsgPort *sdu_MsgPort;
+    void* sdu_Registers;
 
     BOOL sdu_Present;               /* Is a device detected? */
     BOOL sdu_Valid;                 /* Is the device ready for IO? */
     BOOL sdu_ReadOnly;              /* Is the device read-only? */
     BOOL sdu_Motor;                 /* TD_MOTOR state */
     ULONG sdu_ChangeNum;
-
-    struct Library *sdu_ExecBase;
   } sd_Unit[SD_UNITS];
 };
 
-uint16 sdcmd_read_blocks(void* registers, uint32 block, uint8* data, uint32 len);
-uint16 sdcmd_write_blocks(void* registers, uint32 block, uint8* data, uint32 len);
+uint16 sdcmd_read_blocks(void* registers, uint8* data, uint32 block, uint32 len);
+uint16 sdcmd_write_blocks(void* registers, uint8* data, uint32 block, uint32 len);
 uint16 sdcmd_present();
 uint16 sdcmd_detect();
+void sd_set_testmem(uint8* m);
+void sd_reset(void* regs);
+
+#endif

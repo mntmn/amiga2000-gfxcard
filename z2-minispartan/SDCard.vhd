@@ -178,7 +178,8 @@ entity SdCardCtrl is
     cs_bo      : out std_logic                     := HI;  -- Active-low chip-select.
     sclk_o     : out std_logic                     := LO;  -- Serial clock to SD card.
     mosi_o     : out std_logic                     := HI;  -- Serial data output to SD card.
-    miso_i     : in  std_logic                     := ZERO  -- Serial data input from SD card.
+    miso_i     : in  std_logic                     := ZERO;  -- Serial data input from SD card.
+    state_o    : out std_logic_vector(7 downto 0) := x"00"
     );
 end entity;
 
@@ -310,12 +311,12 @@ begin
       elsif (state_v = START_INIT) or (hndShk_r = LO and hndShk_i = LO) then
         -- Both handshakes are low, so the controller operations can proceed.
         
-        busy_o <= YES;  -- Busy by default. Only false when waiting for R/W from host or stalled by error.
+        --busy_o <= YES;  -- Busy by default. Only false when waiting for R/W from host or stalled by error.
 
         case state_v is
           
           when START_INIT =>  -- Deselect the SD card and send it a bunch of clock pulses with MOSI high.
-            error_o          <= (others => ZERO);  -- Clear error flags.
+            --error_o          <= (others => ZERO);  -- Clear error flags.
             clkDivider_v     := INIT_SCLK_PHASE_PERIOD_C - 1;  -- Use slow SPI clock freq during init.
             sclkPhaseTimer_v := INIT_SCLK_PHASE_PERIOD_C - 1;  -- and set the duration of the next clock phase.
             sclk_r           <= LO;     -- Start with low clock to the SD card.
@@ -326,7 +327,10 @@ begin
             state_v          := DESELECT;  -- De-select the SD card and pulse SCLK.
             rtnState_v       := SEND_CMD0;  -- Then go to this state after the clock pulses are done.
             
+            state_o <= x"00";
+            
           when SEND_CMD0 =>             -- Put the SD card in the IDLE state.
+            busy_o           <= YES;
             cs_bo            <= LO;     -- Enable the SD card.
             txCmd_v          := CMD0_C & x"00000000" & x"95";  -- 0x95 is the correct CRC for this command.
             bitCnt_v         := txCmd_v'length;  -- Set bit counter to the size of the command.
@@ -335,12 +339,16 @@ begin
             state_v          := START_TX;  -- Go to FSM subroutine to send the command.
             rtnState_v       := CHK_CMD0_RESPONSE;  -- Then check the response to the command.
             
+            state_o <= x"01";
+            
           when CHK_CMD0_RESPONSE =>  -- Check card's R1 response to the CMD0.
             if rx_v = IDLE_NO_ERRORS_C then
               state_v := SEND_CMD8;  -- Continue init if SD card is in IDLE state with no errors
             else
               state_v := SEND_CMD0;     -- Otherwise, try CMD0 again.
             end if;
+            
+            state_o <= x"02";
             
           when SEND_CMD8 =>  -- This command is needed to initialize SDHC cards.
             cs_bo            <= LO;     -- Enable the SD card.
@@ -351,6 +359,8 @@ begin
             state_v          := START_TX;  -- Go to FSM subroutine to send the command.
             rtnState_v       := GET_CMD8_RESPONSE;  -- Then go to this state after the command is sent.
             
+            state_o <= x"03";
+            
           when GET_CMD8_RESPONSE =>     -- Get the R7 response to CMD8.
             cs_bo            <= LO;  -- The SD card should already be enabled, but let's be explicit.
             bitCnt_v         := 31;     -- Four bytes (32 bits) in R7 response.
@@ -358,6 +368,8 @@ begin
             doDeselect_v     := true;  -- De-select card to end the command after getting the four bytes.
             state_v          := RX_BITS;  -- Go to FSM subroutine to get the R7 response.
             rtnState_v       := SEND_CMD55;  -- Then go here (we don't care what the actual R7 response is).
+            
+            state_o <= x"04";
 
           when SEND_CMD55 =>  -- Send CMD55 as preamble of ACMD41 initialization command.
             cs_bo            <= LO;     -- Enable the SD card.
@@ -368,6 +380,8 @@ begin
             state_v          := START_TX;  -- Go to FSM subroutine to send the command.
             rtnState_v       := SEND_CMD41;  -- Then go to this state after the command is sent.
             
+            state_o <= x"05";
+            
           when SEND_CMD41 =>  -- Send the SD card the initialization command.
             cs_bo            <= LO;     -- Enable the SD card.
             txCmd_v          := CMD41_C & x"40000000" & FAKE_CRC_C;
@@ -376,6 +390,8 @@ begin
             doDeselect_v     := true;  -- De-select SD card after this command finishes.
             state_v          := START_TX;  -- Go to FSM subroutine to send the command.
             rtnState_v       := CHK_ACMD41_RESPONSE;  -- Then check the response to the command.
+            
+            state_o <= x"06";
             
           when CHK_ACMD41_RESPONSE =>
             -- The CMD55, CMD41 sequence should cause the SD card to leave the IDLE state
@@ -389,7 +405,11 @@ begin
               state_v := REPORT_ERROR;  -- Report the error and stall.
             end if;
             
+            state_o <= x"07";
+            
           when WAIT_FOR_HOST_RW =>  -- Wait for the host to read or write a block of data from the SD card.
+            state_o <= x"08";
+            
             clkDivider_v     := SCLK_PHASE_PERIOD_C - 1;  -- Set SPI clock frequency for normal operation.
             getCmdResponse_v := true;  -- Get R1 response to any commands issued to the SD card.
             if rd_i = YES then  -- send READ command and address to the SD card.
@@ -433,6 +453,10 @@ begin
             end if;
 
           when RD_BLK =>          -- Read a block of data from the SD card.
+            state_o <= x"09";
+            
+            busy_o <= YES;
+            
             -- Some default values for these...
             rtnData_v  := false;  -- Data is only returned to host in one place.
             bitCnt_v   := rx_v'length - 1;   -- Receiving byte-sized data.
@@ -466,6 +490,9 @@ begin
             end if;
             
           when WR_BLK =>             -- Write a block of data to the SD card.
+            state_o <= x"10";
+            
+            busy_o <= YES;
             -- Some default values for these...
             getCmdResponse_v := false;  -- Sending data bytes so there's no command response from SD card.
             bitCnt_v         := txData_v'length;  -- Transmitting byte-sized data.
@@ -495,6 +522,8 @@ begin
             byteCnt_v := byteCnt_v - 1;
             
           when WR_WAIT =>  -- Wait for SD card to finish writing the data block.
+            state_o <= x"11";
+            
             -- The SD card will pull MISO low while it is busy, and raise it when it is done.
             sclk_r           <= not sclk_r;    -- Toggle the SPI clock...
             sclkPhaseTimer_v := clkDivider_v;  -- and set the duration of the next clock phase.
@@ -505,6 +534,8 @@ begin
             end if;
             
           when START_TX =>
+            state_o <= x"12";
+            
             -- Start sending command/data by lowering SCLK and outputing MSB of command/data
             -- so it has plenty of setup before the rising edge of SCLK.
             sclk_r           <= LO;  -- Lower the SCLK (although it should already be low).
@@ -515,6 +546,8 @@ begin
             state_v          := TX_BITS;  -- Go here to shift out the rest of the command/data bits.
             
           when TX_BITS =>  -- Shift out remaining command/data bits and (possibly) get response from SD card.
+            state_o <= x"13";
+            
             sclk_r           <= not sclk_r;    -- Toggle the SPI clock...
             sclkPhaseTimer_v := clkDivider_v;  -- and set the duration of the next clock phase.
             if sclk_r = HI then
@@ -536,6 +569,8 @@ begin
             end if;
 
           when GET_CMD_RESPONSE =>  -- Get the response of the SD card to a command.
+            state_o <= x"14";
+            
             if sclk_r = HI and miso_i = LO then  -- MISO will be held high by SD card until 1st bit of R1 response, which is 0.
               -- Shift in the MSB bit of the response.
               rx_v     := rx_v(rx_v'high-1 downto 0) & miso_i;
@@ -546,6 +581,8 @@ begin
             sclkPhaseTimer_v := clkDivider_v;  -- and set the duration of the next clock phase.
 
           when RX_BITS =>               -- Receive bits from the SD card.
+            state_o <= x"15";
+            
             if sclk_r = HI then    -- Bits enter after the rising edge of SCLK.
               rx_v := rx_v(rx_v'high-1 downto 0) & miso_i;
               if bitCnt_v /= 0 then     -- More bits left to receive.
@@ -567,6 +604,9 @@ begin
             sclkPhaseTimer_v := clkDivider_v;  -- and set the duration of the next clock phase.
             
           when DESELECT =>  -- De-select the SD card and send some clock pulses (Must enter with sclk at zero.)
+            state_o <= x"16";
+            
+            busy_o <= NO;
             doDeselect_v     := false;  -- Once the de-select is done, clear the flag that caused it.
             cs_bo            <= HI;     -- De-select the SD card.
             mosi_o           <= HI;  -- Keep the data input of the SD card pulled high.
@@ -575,6 +615,8 @@ begin
             sclkPhaseTimer_v := clkDivider_v;  -- Set the duration of the next clock phase.
             
           when PULSE_SCLK =>  -- Issue some clock pulses. (Must enter with sclk at zero.)
+            state_o <= x"17";
+            
             if sclk_r = HI then
               if bitCnt_v /= 0 then
                 bitCnt_v := bitCnt_v - 1;
@@ -586,8 +628,12 @@ begin
             sclkPhaseTimer_v := clkDivider_v;  -- and set the duration of the next clock phase.
             
           when REPORT_ERROR =>  -- Report the error code and stall here until a reset occurs.
+            state_o <= x"18";
+            
             error_o(rx_v'range) <= rx_v;  -- Output the SD card response as the error code.
-            busy_o              <= NO;  -- Not busy.
+            busy_o              <= YES;
+            state_v          := START_INIT;  -- Send the FSM to the initialization entry-point.
+            sclkPhaseTimer_v := 0;  -- Don't delay the initialization right after reset.
 
           when others =>
             state_v := START_INIT;
