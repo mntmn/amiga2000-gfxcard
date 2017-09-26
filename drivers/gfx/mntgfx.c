@@ -95,9 +95,9 @@ int InitCard(struct RTGBoard* b) {
   b->self = GfxBase;
   b->exec = SysBase;
   b->name = "mntgfx";
-  b->type = 1;
-  b->chip_type = 0;
-  b->controller_type = 0;
+  b->type = 14;
+  b->chip_type = 3;
+  b->controller_type = 3;
 
   b->flags = (1<<20)|(1<<12)|(1<<26); // indisplaychain, flickerfixer, directaccess
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
