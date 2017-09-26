@@ -49,16 +49,15 @@
 struct ExecBase* SysBase;
 
 const char DevName[]="mntsd.device";
-const char DevIdString[]="mntsd 1.6.1 (25 Jul 2017)";
+const char DevIdString[]="mntsd 1.7 (18 Aug 2017)";
 
 const UWORD DevVersion=1;
-const UWORD DevRevision=6;
+const UWORD DevRevision=7;
 
 #include "stabs.h"
 
 #include "mntsd_cmd.h"
 
-struct WBStartup *_WBenchMsg;
 struct SDBase* SDBase;
 
 #define debug(x,args...) while(0){};
@@ -67,10 +66,9 @@ struct SDBase* SDBase;
 //#define bug(x,args...) kprintf(x ,##args);
 //#define debug(x,args...) bug("%s:%ld " x "\n", __func__, (unsigned long)__LINE__ ,##args)
 
-void _cleanup() {
-}
-void _exit() {
-}
+struct WBStartup *_WBenchMsg;
+void _cleanup() {}
+void _exit() {}
 
 void SD_InitUnit(struct SDBase* SDBase, int id, uint8* registers);
 LONG SD_PerformIO(struct SDUnit* sdu, struct IORequest *io);
@@ -88,12 +86,7 @@ int __UserDevInit(struct Device* dev)
   uint32 i;
   
   SysBase = *(struct ExecBase **)4L;
-
   //DOSBase[0]=OpenLibrary("dos.library", 0);
-  //VPrintf("Hello from __UserDevInit of mntsd.device %x.%x\n",&DevVersion,&DevRevision);
-  /*for (i=0;i<10;i++) {
-    VPrintf("counter test: %lx\n",&i);
-  }*/
   
   if ((ExpansionBase = (struct Library*)OpenLibrary("expansion.library",0L))==NULL) {
     return 0;
@@ -112,7 +105,6 @@ int __UserDevInit(struct Device* dev)
 
   for (i = 0; i < SD_UNITS; i++) SD_InitUnit(SDBase, i, registers);
   
-  //VPrintf("mntsd init done, regs: %lx\n",&registers);
   return 1;
 }
 
@@ -143,8 +135,6 @@ int __UserDevOpen(struct IOExtTD *iotd, ULONG unitnum, ULONG flags)
 
   if (iotd && unitnum==0) {
     io_err = 0;
-    // Mark IORequest as "complete"
-    //node->ln_Type = NT_REPLYMSG;
     iotd->iotd_Req.io_Unit = (struct Unit*)&SDBase->sd_Unit[unitnum];
     iotd->iotd_Req.io_Unit->unit_flags = UNITF_ACTIVE;
     iotd->iotd_Req.io_Unit->unit_OpenCnt = 1;
@@ -185,7 +175,6 @@ void __AbortIO(struct IORequest* io) {
   io->io_Error = IOERR_ABORTED;
 }
 
-
 void SD_InitUnit(struct SDBase* SDBase, int id, uint8* registers)
 {
   struct SDUnit *sdu = &SDBase->sd_Unit[id];
@@ -218,9 +207,10 @@ uint32 SD_ReadWrite(struct SDUnit *sdu, struct IORequest *io, uint32 offset, BOO
   data = iotd->iotd_Req.io_Data;
   len = iotd->iotd_Req.io_Length;
   
-  max_addr = SD_CYL_SECTORS * SD_CYLS * SD_SECTOR_BYTES;
-  
-  if ((offset >= max_addr) || (offset+len >= max_addr)) {
+  max_addr = 0xffffffff; //SD_CYL_SECTORS * SD_CYLS * SD_SECTOR_BYTES;
+
+  // well... if we had 64 bits this would make sense
+  if ((offset > max_addr) || (offset+len > max_addr)) {
     return IOERR_BADADDRESS;
   }
   if (data == 0) {

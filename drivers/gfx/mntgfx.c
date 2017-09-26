@@ -25,16 +25,28 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+// REVISION 1.7.2
+
 #include "mntgfx.h"
 #include "va2000.h"
 
-//#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
+#include <exec/io.h>
+#include <proto/exec.h>
+#include <proto/expansion.h>
 
+// TODO: make this an ENV switch
+#define CX_ENABLED 1
+#define SCR_CAPMODE 0 // scratch variable 0
+
+//#define debug(x,args...) kprintf("%s:%ld " x "\n", __func__, (uint32)__LINE__ ,##args)
 #define debug(x,args...) ;
+
+struct WBStartup *_WBenchMsg;
+void _cleanup() {}
+void _exit() {}
 
 struct ExecBase* SysBase;
 struct Library* GfxBase;
-struct Library* ExpansionBase;
 
 int __UserLibInit(struct Library *libBase)
 {
@@ -44,21 +56,19 @@ int __UserLibInit(struct Library *libBase)
   return 1;
 }
 
-void __UserLibCleanup(void)
-{
-}
+void __UserLibCleanup(void) {}
 
 ADDTABL_1(FindCard,a0);
 int FindCard(struct RTGBoard* b) {
   struct ConfigDev* cd = NULL;
   uint16 fwrev = 0;
 
-  if ((ExpansionBase = (struct Library*)OpenLibrary("expansion.library",0L))==NULL) {
+  if ((ExpansionBase = (struct ExpansionBase*)OpenLibrary("expansion.library",0L))==NULL) {
     debug("failed to open expansion.library!");
     return 0;
   }
 
-  if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
+  if ((cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1))) {
     debug("MNT VA2000 found.");
     b->memory = (uint8*)(cd->cd_BoardAddr)+0x10000;
     b->memory_size = cd->cd_BoardSize-0x10000;
@@ -66,7 +76,7 @@ int FindCard(struct RTGBoard* b) {
     fwrev = ((uint16*)b->registers)[0];
 
     // exit if fw rev not 5 (incompatible memory layout)
-    if (fwrev!=5 && fwrev!=6) return 0;
+    if (fwrev<5) return 0;
 
     debug("Memory %lx",b->memory);
     debug("Memsize %lx",b->memory_size);
@@ -81,21 +91,18 @@ int FindCard(struct RTGBoard* b) {
 ADDTABL_1(InitCard,a0);
 int InitCard(struct RTGBoard* b) {
   int max;
-  int i=0;
 
   b->self = GfxBase;
   b->exec = SysBase;
   b->name = "mntgfx";
-  b->type = 14;
-  b->chip_type = 3;
-  b->controller_type = 3;
+  b->type = 1;
+  b->chip_type = 0;
+  b->controller_type = 0;
 
-  // 1|(1<<16)|
-  b->flags = (1<<20)|(1<<12); // 0 = has sprite, 16 = 32x32 sprite, 20 = display switch, 12 = flickerfix
-
+  b->flags = (1<<20)|(1<<12)|(1<<26); // indisplaychain, flickerfixer, directaccess
   b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
-  b->sprite_flags = 0; //b->color_formats;
-  b->bits_per_channel = 6;
+  b->sprite_flags = 0;
+  b->bits_per_channel = 8;
 
   max = 8191;
   b->max_bitmap_w_planar = max;
@@ -125,8 +132,8 @@ int InitCard(struct RTGBoard* b) {
   b->max_res_h_32bit = max;
 
   // no alloc yet
-  b->max_alloc = 0;
-  b->max_alloc_part = 0;
+  //b->max_alloc = 0;
+  //b->max_alloc_part = 0;
 
   b->clock_ram = CLOCK_HZ;
   b->num_pixelclocks_planar = 1;
@@ -145,8 +152,12 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_palette = set_palette;
   b->fn_enable_display = enable_display;
 
+  //b->fn_p2c = rect_p2c;
   b->fn_rect_fill = rect_fill;
   b->fn_rect_copy = rect_copy;
+  //b->fn_rect_pattern = rect_pattern;
+  //b->fn_rect_template = rect_template; // text drawing!
+  //b->fn_rect_copy_nomask = rect_copy_nomask; // used for window copying?
   b->fn_blitter_wait = blitter_wait;
 
   b->fn_get_pixelclock_index = get_pixelclock_index;
@@ -162,7 +173,7 @@ int InitCard(struct RTGBoard* b) {
   b->fn_set_write_mask = set_write_mask;
   b->fn_set_clear_mask = set_clear_mask;
   b->fn_set_read_plane = set_read_plane;
-
+  
   /*b->fn_sprite_setup = sprite_setup;
   b->fn_sprite_xy = sprite_xy;
   b->fn_sprite_bitmap = sprite_bitmap;
@@ -170,6 +181,20 @@ int InitCard(struct RTGBoard* b) {
 
   return 1;
 }
+
+/*void serp1(char* str, uint32 val) {
+  char* tbl="0123456789abcdef";
+  char* ptr = str+strlen(str)-10; // 8 digits + crlf
+  ptr[0]=tbl[(val&0xf0000000)>>28];
+  ptr[1]=tbl[(val&0xf000000)>>24];
+  ptr[2]=tbl[(val&0xf00000)>>20];
+  ptr[3]=tbl[(val&0xf0000)>>16];
+  ptr[4]=tbl[(val&0xf000)>>12];
+  ptr[5]=tbl[(val&0xf00)>>8];
+  ptr[6]=tbl[(val&0xf0)>>4];
+  ptr[7]=tbl[(val&0xf)];
+  KPutStr(str);
+}*/
 
 // placeholder function
 void nop() {
@@ -182,32 +207,34 @@ uint32 enable_display(register struct RTGBoard* b asm("a0"), register uint16 ena
   return 1;
 }
 
+void memory_alloc(register struct RTGBoard* b asm("a0"), register uint32 len asm("d0"), register uint16 s1 asm("d1"), register uint16 s2 asm("d2")) {
+}
+
 void pan(register struct RTGBoard* b asm("a0"), register void* mem asm("a1"), register uint16 w asm("d0"), register int16 x asm("d1"), register int16 y asm("d2"), register uint16 format asm("d7")) {
   MNTVARegs* registers = b->registers;
 
-  uint32 offset = (mem-(b->memory))>>1;
+  uint32 offset = (mem-(b->memory))>>1; // offset divided by 2 = number of words
   uint16 offhi = (offset&0xffff0000)>>16;
-  uint16 offlo = offset&0xffff;
-  uint16 shift = offlo&0x0fff;
-  offlo = offlo&0xf000;
+  uint16 offlo = offset&0xfc00;
 
   registers->pan_ptr_hi = offhi;
   registers->pan_ptr_lo = offlo;
-  //*((uint16*)(registers+0x0c))=8+shift;
+  registers->capture_mode = 0; // CHECKME
+  b->scratch[SCR_CAPMODE] = 0;
 }
 
 void set_memory_mode(register struct RTGBoard* b asm("a0"), register uint16 format asm("d7")) {
 }
-void set_read_plane(register struct RTGBoard* b asm("a0"), uint8 p asm("d0")) {
+void set_read_plane(register struct RTGBoard* b asm("a0"), register uint8 p asm("d0")) {
 }
-void set_write_mask(register struct RTGBoard* b asm("a0"), uint8 m asm("d0")) {
+void set_write_mask(register struct RTGBoard* b asm("a0"), register uint8 m asm("d0")) {
 }
-void set_clear_mask(register struct RTGBoard* b asm("a0"), uint8 m asm("d0")) {
+void set_clear_mask(register struct RTGBoard* b asm("a0"), register uint8 m asm("d0")) {
 }
 void vsync_wait(register struct RTGBoard* b asm("a0")) {
 }
-int is_vsynced(register struct RTGBoard* b asm("a0")) {
-  return 0;
+int is_vsynced(register struct RTGBoard* b asm("a0"), register uint8 p asm("d0")) {
+  return 1;
 }
 void set_clock(register struct RTGBoard* b asm("a0")) {
 }
@@ -215,7 +242,6 @@ void set_clock(register struct RTGBoard* b asm("a0")) {
 void set_palette(register struct RTGBoard* b asm("a0"), uint16 idx asm("d0"), uint16 len asm("d1")) {
   int i;
   int j;
-  MNTVARegs* registers = b->registers;
   uint16* palreg_r = (uint16*)(((uint8*)b->registers)+0x200);
   uint16* palreg_g = (uint16*)(((uint8*)b->registers)+0x400);
   uint16* palreg_b = (uint16*)(((uint8*)b->registers)+0x600);
@@ -331,8 +357,6 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   uint16 scale = 0;
   uint16 w;
   uint16 h;
-  uint16 pitch;
-  uint16 pitch_shift;
   uint16 colormode;
 
   b->mode_info = m;
@@ -372,7 +396,6 @@ void init_mode(register struct RTGBoard* b asm("a0"), struct ModeInfo* m asm("a1
   registers->screen_h = h;
 
   if (colormode==MNTVA_COLOR_32BIT) {
-    // CHECK
     // for 32bit color, screenw is 2*hrez (fetch double the data)
     registers->line_w = 4+2*w;
   } else if (colormode==MNTVA_COLOR_8BIT) {
@@ -404,8 +427,8 @@ uint32 get_pixelclock_hz(register struct RTGBoard* b asm("a0"), struct ModeInfo*
 
 uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d0")) {
   MNTVARegs* registers = b->registers;
-
-  if (state==0) {
+  
+  if (state==0 && CX_ENABLED) {
     // capture amiga video to 16bit
     registers->colormode = MNTVA_COLOR_16BIT565;
     registers->scalemode = 4; // scalemode x1:1, y2:1
@@ -420,6 +443,7 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     registers->margin_x = 0xa;
 
     registers->capture_mode = 0;
+    b->scratch[SCR_CAPMODE] = 0;
 
     // clear the capture buffer
     registers->blitter_base_hi = 0xf8;
@@ -428,13 +452,14 @@ uint32 monitor_switch(register struct RTGBoard* b asm("a0"), uint16 state asm("d
     blitter_wait(b);
 
     registers->capture_mode = 1;
-
+    b->scratch[SCR_CAPMODE] = 1;
   } else {
     // rtg mode
     registers->capture_mode = 0;
+    b->scratch[SCR_CAPMODE] = 0;
     init_mode(b, b->mode_info, b->border);
   }
-
+  
   return 1-state;
 }
 
@@ -446,9 +471,15 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   MNTVARegs* registers = b->registers;
   uint8* gfxmem = (uint8*)b->memory;
   uint32 color_format = b->color_format;
+  uint32 offset = 0;
+  
+  registers->blitter_enable = 0;
 
+  // no blitting in capture mode
+  if (b->scratch[SCR_CAPMODE]==1) return;
+  
   if (r) {
-    uint32 offset = (r->memory-(b->memory))>>1;
+    offset = (r->memory-(b->memory))>>1;
     registers->blitter_base_hi = (offset&0xffff0000)>>16;
     registers->blitter_base_lo = offset&0xffff;
     pitch = r->pitch;
@@ -512,20 +543,27 @@ void rect_fill(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   registers->blitter_y2 = y+h;
 
   registers->blitter_enable = 1;
+  blitter_wait(b);
 }
 
 void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7")) {
-  uint16 blitter_busy = 0;
   MNTVARegs* registers = b->registers;
   uint16 pitch = 1024;
   uint32 color_format = b->color_format;
-  uint8* gfxmem = (uint8*)b->memory;
-  uint8* ptr;
-  uint8* ptr_src;
-  int i;
+  uint32 offset = 0;
+
+  //uint8* gfxmem = (uint8*)b->memory;
+  //uint8* ptr;
+  //uint8* ptr_src;
+  //int i;
+  
+  registers->blitter_enable = 0;
+
+  // no blitting in capture mode
+  if (b->scratch[SCR_CAPMODE]==1) return;
 
   if (r) {
-    uint32 offset = (r->memory-(b->memory))>>1;
+    offset = (r->memory-(b->memory))>>1;
     registers->blitter_base_hi = (offset&0xffff0000)>>16;
     registers->blitter_base_lo = offset&0xffff;
     pitch = r->pitch;
@@ -611,10 +649,51 @@ void rect_copy(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("
   }
 
   registers->blitter_enable = 2;
+  blitter_wait(b);
 }
 
+/*void rect_p2c(register struct RTGBoard* b asm("a0"), struct BitMap* bm asm("a1"), struct RenderInfo* r asm("a2"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 minterm asm("d6"), uint8 mask asm("d7")) {
+  serp1("P2C  mask $00000000  ",(uint32)mask);
+  serp1("term $00000000  ",(uint32)minterm);
+  serp1("P2C  x    $00000000  ",(uint32)x);
+  serp1("y    $00000000  ",(uint32)y);
+  serp1("dx   $00000000  ",(uint32)dx);
+  serp1("dy   $00000000  ",(uint32)dy);
+  serp1("w    $00000000  ",(uint32)w);
+  serp1("h    $00000000\r\n",(uint32)h);
+}
+
+void rect_template(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), struct Template* tp asm("a2"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint8 mask asm("d4"), uint32 format asm("d7")) {
+  serp1("TMPL mask $00000000  ",(uint32)mask);
+  serp1("frmt $00000000  ",(uint32)format);
+  serp1("TMPL x    $00000000  ",(uint32)x);
+  serp1("y    $00000000  ",(uint32)y);
+  serp1("w    $00000000  ",(uint32)w);
+  serp1("h    $00000000\r\n",(uint32)h);
+}
+
+void rect_pattern(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), struct Pattern* pat asm("a2"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 w asm("d2"), uint16 h asm("d3"), uint8 mask asm("d4"), uint32 format asm("d7")) {
+  serp1("PTTN mask $00000000  ",(uint32)mask);
+  serp1("frmt $00000000  ",(uint32)format);
+  serp1("PTTN x    $00000000  ",(uint32)x);
+  serp1("y    $00000000  ",(uint32)y);
+  serp1("w    $00000000  ",(uint32)w);
+  serp1("h    $00000000\r\n",(uint32)h);
+}
+
+void rect_copy_nomask(register struct RTGBoard* b asm("a0"), struct RenderInfo* sr asm("a1"), struct RenderInfo* dr asm("a2"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 opcode asm("d6"), uint32 format asm("d7")) {
+  serp1("COPC code $00000000  ",(uint32)opcode);
+  serp1("frmt $00000000  ",(uint32)format);
+  serp1("COPC x    $00000000  ",(uint32)x);
+  serp1("y    $00000000  ",(uint32)y);
+  serp1("dx   $00000000  ",(uint32)dx);
+  serp1("dy   $00000000  ",(uint32)dy);
+  serp1("w    $00000000  ",(uint32)w);
+  serp1("h    $00000000\r\n",(uint32)h);
+}*/
+
 void blitter_wait(register struct RTGBoard* b asm("a0")) {
-  uint16 blitter_busy = 0;
+  volatile uint16 blitter_busy = 0;
   MNTVARegs* registers = b->registers;
   do {
     blitter_busy = registers->blitter_enable;

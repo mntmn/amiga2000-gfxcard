@@ -150,8 +150,6 @@ NET "zFC2"  LOC="B12" |IOSTANDARD=LVTTL;
 
 NET "znDS0"  LOC="C13" |IOSTANDARD=LVTTL;
 NET "znDS1"  LOC="P7" |IOSTANDARD=LVTTL;
-#NET "znDS2"  LOC="B14" |IOSTANDARD=LVTTL;
-#NET "znDS3"  LOC="N9" |IOSTANDARD=LVTTL;
 NET "znLDS"  LOC="B14" |IOSTANDARD=LVTTL;
 NET "znUDS"  LOC="N9" |IOSTANDARD=LVTTL;
 NET "zREAD"  LOC="A14" |IOSTANDARD=LVTTL;
@@ -183,15 +181,6 @@ NET "videoG1"  LOC="D3" |IOSTANDARD=LVTTL;
 NET "videoG2"  LOC="E4" |IOSTANDARD=LVTTL;
 NET "videoG3"  LOC="K11" |IOSTANDARD=LVTTL;
 
-
-#NET "TMDS_out_P<0>"  LOC = "C13" |IOSTANDARD = TMDS_33 ; # Blue
-#NET "TMDS_out_N<0>"  LOC = "A13" |IOSTANDARD = TMDS_33 ;
-#NET "TMDS_out_P<1>"  LOC = "B12" |IOSTANDARD = TMDS_33 ; # Red
-#NET "TMDS_out_N<1>"  LOC = "A12" |IOSTANDARD = TMDS_33 ;
-#NET "TMDS_out_P<2>"  LOC = "C11" |IOSTANDARD = TMDS_33 ; # Green
-#NET "TMDS_out_N<2>"  LOC = "A11" |IOSTANDARD = TMDS_33 ;
-#NET "TMDS_out_P<3>"  LOC = "B14" |IOSTANDARD = TMDS_33 ; # Clock
-#NET "TMDS_out_N<3>"  LOC = "A14" |IOSTANDARD = TMDS_33 ;
 NET "TMDS_out_P<0>"  LOC = "C7" |IOSTANDARD = TMDS_33 ; # Blue
 NET "TMDS_out_N<0>"  LOC = "A7" |IOSTANDARD = TMDS_33 ;
 NET "TMDS_out_P<1>"  LOC = "B6" |IOSTANDARD = TMDS_33 ; # Red
@@ -220,4 +209,4 @@ NET "*/U0/xst_fifo_generator/gconvfifo.rf/grf.rf/gntv_or_sync_fifo.mem/gdm.dm*" 
 
 NET "CLK50" TNM_NET = CLK50;
 NET "zE7M" TNM_NET = zE7M;
-NET "vga_clk_sel0_latch<1>" TIG;
+//NET "vga_clk_sel0_latch<1>" TIG;

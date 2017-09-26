@@ -97,6 +97,25 @@ struct RenderInfo {
   uint32 color_format;
 };
 
+struct Template {
+  uint8* memory;
+  uint16 pitch;
+  uint16 xo;
+  uint16 yo;
+  uint32 fg_pen;
+  uint32 bg_pen;
+};
+
+struct Pattern {
+  uint8* memory;
+  uint16 xo;
+  uint16 yo;
+  uint32 fg_pen;
+  uint32 bg_pen;
+  uint8 size;
+  uint8 mode;
+};
+
 struct RTGBoard {
   void* registers;
   void* memory;
@@ -201,14 +220,14 @@ struct RTGBoard {
   void* fn_rect_invert_fallback;
   void* fn_rect_copy;
   void (*fn_rect_copy_fallback)(register struct RTGBoard* b asm("a0"), struct RenderInfo* r asm("a1"), uint16 x asm("d0"), uint16 y asm("d1"), uint16 dx asm("d2"), uint16 dy asm("d3"), uint16 w asm("d4"), uint16 h asm("d5"), uint8 m asm("d6"), uint16 format asm("d7"));
-  void* f34;
-  void* f35;
+  void* fn_rect_template;
+  void* fn_rect_template_fallback;
   void* fn_rect_pattern;
   void* fn_rect_pattern_fallback;
   void* fn_line;
   void* fn_line_fallback;
-  void* f40;
-  void* f41;
+  void* fn_rect_copy_nomask;
+  void* fn_rect_copy_nomask_fallback;
   void* f42;
   void* f43;
   void* f44; // res0

@@ -49,12 +49,14 @@ int main(int argc, char** argv) {
       *((volatile uint16_t*)(regs+0x06)) = width;
       *((volatile uint16_t*)(regs+0x08)) = height;
     }
-  } else if (argc==3 && !strcmp(argv[1],"voffset")) {
+  } else if (argc==3 || argc==4 && !strcmp(argv[1],"voffset")) {
     uint16_t voffset = atoi(argv[2]);
     reg = (volatile uint16_t*)(regs+0x3e);
     *reg = voffset;
-    reg = (volatile uint16_t*)(regs+0x3a); // pan:lo
-    *reg = 1024*voffset;
+    if (argc==4 && !strcmp(argv[3],"apply")) {
+      reg = (volatile uint16_t*)(regs+0x3a); // pan:lo
+      *reg = 1024*voffset;
+    }
   } else if (argc==3 && !strcmp(argv[1],"hoffset")) {
     uint16_t hoffset = atoi(argv[2]);
     reg = (volatile uint16_t*)(regs+0x3c);
