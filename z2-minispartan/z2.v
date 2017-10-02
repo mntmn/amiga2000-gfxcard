@@ -222,8 +222,8 @@ reg display_enable = 1;
 
 reg [10:0] glitchx2_reg = 'h1fd;
 reg [8:0]  ram_burst_col = 'h1fe; //'b111111010;
-//reg [10:0] fetch_preroll = 64;
-parameter fetch_preroll = 64;
+reg [10:0] fetch_preroll = 64;
+//parameter fetch_preroll = 64;
 
 reg [15:0] row_pitch = 2048;
 reg [3:0] row_pitch_shift = 11; // 2048 = 1<<11
@@ -464,7 +464,7 @@ reg [7:0] datain_counter = 0;
 
 reg [4:0] margin_x = 8;
 reg [10:0] safe_x1 = 0;
-reg [10:0] safe_x2 = 'h60;
+reg [10:0] safe_x2 = 'h010; //'h60;
 
 // blitter registers
 reg [15:0] blitter_x1 = 0; // 20
@@ -596,7 +596,6 @@ reg [9:0] videocap_ymax = 0;
 reg [9:0] videocap_y3 = 0;
 reg [23:0] videocap_addr = 0;
 reg [15:0] videocap_data = 0;
-reg [7:0] videocap_porch = 'h28;
 reg [9:0] videocap_hs = 0;
 reg [9:0] videocap_hs2 = 0;
 reg [9:0] videocap_vs = 0;
@@ -605,15 +604,17 @@ reg [9:0] videocap_save_x = 0;
 reg [9:0] videocap_save_x2 = 0;
 reg [9:0] videocap_line_saved_y = 0;
 reg  [23:0] videocap_save_next_addr = 0;
+reg  [23:0] videocap_save_base = 0;
 reg videocap_line_saved = 0;
 
 reg [15:0] videocap_rgbin = 0;
 reg [15:0] videocap_rgbin2 = 0;
 reg [9:0]  videocap_default_w = 640;
-reg [9:0]  videocap_default_h = 480;
-reg [6:0]  videocap_voffset = 40;
+reg [9:0]  videocap_default_h = 512; //480;
+reg [9:0]  videocap_voffset = 'h2a;
 reg [9:0] videocap_prex = 'h41;
-reg [8:0] videocap_height = 'h117; // 'h127;
+reg [9:0] videocap_prex2 = 0;
+reg [9:0] videocap_height = 'h200; //'h117; // 'h127;
 reg [8:0] videocap_width = 320;
 
 reg [7:0] vscount = 0;
@@ -625,28 +626,59 @@ parameter VCAPW = 399;
 
 reg [15:0] videocap_buf [0:VCAPW];
 reg [15:0] videocap_buf2 [0:VCAPW];
+reg videocap_lace_field=0;
+reg videocap_interlace=0;
+reg videocap_ntsc=0;
+reg [9:0] videocap_voffset2=0;
 
-
-// VIDEO CAPTURE
+// VIDEO CAPTURE -----------------------------------------------------
 always @(posedge dcm7_0) begin
   videocap_hs <= {videocap_hs[8:0], videoHS};
   videocap_vs <= {videocap_vs[8:0], videoVS};
   
   videocap_rgbin <= {videoR3,videoR2,videoR1,videoR0,videoR3, 
-                    videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
-                    videoB3,videoB2,videoB1,videoB0,videoB3};
+                     videoG3,videoG2,videoG1,videoG0,videoG3,videoG2,
+                     videoB3,videoB2,videoB1,videoB0,videoB3};
   
   if (!videocap_mode) begin
     // do nothing
-  end else if (videocap_vs[6:1]=='b000111) begin
-    videocap_y2 <= 0;
-    videocap_ymax <= {videocap_y2,1'b0}-{videocap_voffset,1'b0};
+  end else if (videocap_vs[6:1]=='b111000) begin
+    if (videocap_y2>1) begin
+      if (videocap_ymax=='h270 || videocap_ymax=='h20c)
+        videocap_lace_field <= 0;
+      else
+        videocap_lace_field <= ~videocap_lace_field;
+        
+      if (videocap_ymax=='h138 || videocap_ymax=='h271) begin
+        videocap_interlace <= 1;
+        videocap_ntsc <= 0;
+      end else if (videocap_ymax=='h106 || videocap_ymax=='h20d) begin
+        videocap_interlace <= 1;
+        videocap_ntsc <= 1;
+      end else if (videocap_ymax=='h273) begin
+        videocap_interlace <= 0;
+        videocap_ntsc <= 0;
+      end else  if (videocap_ymax=='h20f) begin
+        videocap_interlace <= 0;
+        videocap_ntsc <= 1;
+      end
+      
+      if (videocap_interlace) begin
+        videocap_y2 <= videocap_lace_field;
+        videocap_voffset2 <= videocap_voffset<<1;
+      end else begin
+        videocap_y2 <= 0;
+        videocap_voffset2 <= videocap_voffset;
+      end
+      
+      videocap_ymax <= videocap_y2;
+    end
   end else if (videocap_hs[6:1]=='b000111) begin
     videocap_x <= 0;
-    if (videocap_y2>videocap_height) begin
-    end else begin
+    if (videocap_interlace)
+      videocap_y2 <= videocap_y2 + 2'b10;
+    else
       videocap_y2 <= videocap_y2 + 1'b1;
-    end
   end else if (videocap_x<VCAPW) begin
     videocap_x <= videocap_x + 1'b1;
     videocap_buf[videocap_x-videocap_prex] <= videocap_rgbin;
@@ -917,12 +949,12 @@ always @(posedge z_sample_clk) begin
       dvid_reset <= 1;
       
       scalemode_h <= 0;
-      scalemode_v <= 1;
+      scalemode_v <= 0; //1;
       colormode <= 1;
       blitter_colormode <= 1;
       
-      blitter_base <= 'hf80000+(videocap_voffset<<10); // capture vertical offset
-      pan_ptr <= 'hf80000+(videocap_voffset<<10); // capture vertical offset
+      blitter_base <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
+      pan_ptr <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
       margin_x <= 10;
       
       blitter_x1 <= 0;
@@ -1543,6 +1575,9 @@ always @(posedge z_sample_clk) begin
         'h54: begin 
               rr_data[31:16] <= videocap_default_w;
               rr_data[15:0]  <= videocap_default_h; end // 'h56
+        'h58: begin
+              rr_data[31:16] <= videocap_ymax;
+              rr_data[15:0] <= 16'h0000; end
         'h60: begin 
               rr_data[31:16] <= {sd_busy_sync,8'h00};
               rr_data[15:0]  <= sd_read; end // 'h62
@@ -1664,8 +1699,8 @@ always @(posedge z_sample_clk) begin
         //'h0e: default_data <= regdata_in[15:0];
         //'h10: preheat_x <= regdata_in[4:0];
         //'h12: vsmax <= regdata_in[7:0];
-        //'h14: safe_x2 <= regdata_in[10:0];
-        //'h1a: fetch_preroll <= regdata_in[10:0];
+        'h14: safe_x2 <= regdata_in[10:0];
+        'h1a: fetch_preroll <= regdata_in[10:0];
         
         // blitter regs
         'h1c: blitter_base[23:16] <= regdata_in[7:0];
@@ -1701,7 +1736,7 @@ always @(posedge z_sample_clk) begin
         'h3a: pan_ptr[15:0]  <= regdata_in;
         
         'h3c: videocap_prex <= regdata_in[9:0];
-        'h3e: videocap_voffset <= regdata_in[6:0];
+        'h3e: videocap_voffset <= regdata_in[9:0];
         
         'h42: blitter_row_pitch <= regdata_in;
         'h44: blitter_row_pitch_shift <= regdata_in[4:0];
@@ -1715,13 +1750,16 @@ always @(posedge z_sample_clk) begin
         'h4c: dcm7_rst <= 1'b1;
         
         'h4e: videocap_mode <= regdata_in[0];
-        'h50: videocap_width <= regdata_in[8:0];
-        'h52: videocap_height <= regdata_in[8:0];
+        'h50: videocap_width <= regdata_in[9:0];
+        'h52: videocap_height <= regdata_in[9:0];
         'h54: videocap_default_w <= regdata_in[9:0];
         'h56: videocap_default_h <= regdata_in[9:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
+        
+        //'h5e: videocap_prex2 <= regdata_in[9:0];
+        'h5e: screen_h <= regdata_in[11:0];
         
         // sd card regs
         'h60: sd_reset <= regdata_in[8];
@@ -1761,13 +1799,20 @@ always @(posedge z_sample_clk) begin
 // =================================================================================
 // RAM ARBITER
 
-  videocap_y3 <= videocap_y2;
+  if (videocap_y2>=videocap_voffset2)
+    videocap_y3 <= videocap_y2-videocap_voffset2;
+  else
+    videocap_y3 <= 0;
+  
   x_safe_area_sync <= {x_safe_area_sync[0], x_safe_area};
 
-  if (videocap_mode && blitter_enable==0) begin
-    if (videocap_y3>=videocap_voffset && videocap_line_saved_y!=videocap_y3 && videocap_line_saved==1) begin
+  if (videocap_mode /*&& blitter_enable==0*/) begin
+    if (videocap_y3<videocap_height 
+        && videocap_line_saved_y!=videocap_y3 
+        && videocap_line_saved==1) begin
       videocap_line_saved <= 0;
-      videocap_line_saved_y <= videocap_y2;
+      videocap_line_saved_y <= videocap_y3;
+      videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<row_pitch_shift);
       videocap_save_x <= 0;
       videocap_save_x2 <= 0;
     end
@@ -1918,10 +1963,10 @@ always @(posedge z_sample_clk) begin
         ram_enable <= 1;
         ram_write <= 1;
         ram_byte_enable <= 'b11;
-        ram_addr <= 'hf80000 | (videocap_y2<<row_pitch_shift) | videocap_save_x2;
-        ram_data_in <= videocap_buf2[videocap_save_x];
-        ram_data_in_next <= videocap_buf[videocap_save_x];
-          
+        ram_addr <= videocap_save_base + videocap_save_x2;
+        ram_data_in <= videocap_buf2[videocap_save_x+videocap_prex2];
+        ram_data_in_next <= videocap_buf[videocap_save_x+videocap_prex2];
+        
         if (videocap_save_x<videocap_width) begin
           videocap_save_x  <= videocap_save_x  + 1'b1;
           videocap_save_x2 <= videocap_save_x2  + 2'b10;
@@ -2103,15 +2148,20 @@ reg[11:0] vga_screen_h = 0;
 always @(posedge vga_clk) begin
   // clock domain sync
   vga_scalemode_h <= scalemode_h;
-  vga_scalemode_v <= scalemode_v;
   vga_colormode <= colormode;
   vga_margin_x <= margin_x;
   vga_h_max <= h_max;
   vga_v_max <= v_max;
-  if (videocap_mode)
-    vga_screen_h <= videocap_ymax;
-  else
+  if (videocap_mode) begin
+    if (videocap_ntsc)
+      vga_screen_h <= 'h19b;
+    else
+      vga_screen_h <= 'h1ff;
+    vga_scalemode_v <= videocap_interlace?0:1;
+  end else begin
     vga_screen_h <= screen_h;
+    vga_scalemode_v <= scalemode_v;
+  end
   vga_h_rez <= h_rez;
   vga_v_rez <= v_rez;
   vga_h_sync_start <= h_sync_start;
