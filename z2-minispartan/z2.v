@@ -210,9 +210,10 @@ reg  ram_burst = 0;
 reg  ram_write_burst = 0;
 reg  [1:0]  ram_byte_enable;
 
-reg  [15:0] fetch_buffer [0:1999];
+parameter FETCHW = 1024;
+reg  [15:0] fetch_buffer [0:(FETCHW+20)];
+reg  [15:0] scale_buffer [0:639];
 reg  [11:0] fetch_x = 0;
-reg  [11:0] fetch_x2 = 0;
 
 reg  [23:0] fetch_y = 0;
 reg  [23:0] pan_ptr = 0;
@@ -222,7 +223,9 @@ reg display_enable = 1;
 
 reg [10:0] glitchx2_reg = 'h1fd;
 reg [8:0]  ram_burst_col = 'h1fe; //'b111111010;
-reg [10:0] fetch_preroll = 64;
+
+reg [15:0] fetch_w = FETCHW;
+reg [15:0] fetch_preroll = FETCHW-64;
 //parameter fetch_preroll = 64;
 
 reg [15:0] row_pitch = 2048;
@@ -942,7 +945,7 @@ always @(posedge z_sample_clk) begin
       v_sync_end   <= 604;
       v_max        <= 631;
       
-      row_pitch    <= 1024;
+      row_pitch    <= 640; //1024;
       row_pitch_shift <= 10;
       
       videocap_mode <= 0;
@@ -988,11 +991,11 @@ always @(posedge z_sample_clk) begin
     
     DECIDE_Z2_Z3: begin
       // poor man's z3sense
-      if (zaddr_autoconfig) begin
+      /*if (zaddr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end else if (z3addr_autoconfig) begin
+      end else*/ if (z3addr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
@@ -1699,8 +1702,10 @@ always @(posedge z_sample_clk) begin
         //'h0e: default_data <= regdata_in[15:0];
         //'h10: preheat_x <= regdata_in[4:0];
         //'h12: vsmax <= regdata_in[7:0];
+        'h12: fetch_w <= regdata_in[15:0];
         'h14: safe_x2 <= regdata_in[10:0];
-        'h1a: fetch_preroll <= regdata_in[10:0];
+        //'h14: scanout_wrapx <= regdata_in[15:0];
+        'h1a: fetch_preroll <= regdata_in[15:0];
         
         // blitter regs
         'h1c: blitter_base[23:16] <= regdata_in[7:0];
@@ -1723,6 +1728,8 @@ always @(posedge z_sample_clk) begin
           
           blitter_ptr  <= blitter_base + (blitter_y1 << blitter_row_pitch_shift);
           blitter_ptr2 <= blitter_base + (blitter_y3 << blitter_row_pitch_shift);
+          //blitter_ptr  <= blitter_base + (blitter_y1 * blitter_row_pitch);
+          //blitter_ptr2 <= blitter_base + (blitter_y3 * blitter_row_pitch);
           blitter_rgb32_t <= 0;
         end
         'h2c: blitter_x3 <= regdata_in[11:0];
@@ -1812,7 +1819,8 @@ always @(posedge z_sample_clk) begin
         && videocap_line_saved==1) begin
       videocap_line_saved <= 0;
       videocap_line_saved_y <= videocap_y3;
-      videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<row_pitch_shift);
+      //videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<row_pitch_shift);
+      videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)*640);
       videocap_save_x <= 0;
       videocap_save_x2 <= 0;
     end
@@ -1822,7 +1830,8 @@ always @(posedge z_sample_clk) begin
     RAM_READY: begin
       ram_enable <= 0;
       ram_arbiter_state <= RAM_READY2;
-      fetch_y <= pan_ptr + (fetch_line_y << row_pitch_shift);
+      fetch_y <= pan_ptr + (fetch_line_y*fetch_w); // 512
+      //fetch_y <= pan_ptr + (fetch_line_y * row_pitch);
     end
     
     RAM_READY2: begin
@@ -1840,7 +1849,6 @@ always @(posedge z_sample_clk) begin
         ram_arbiter_state <= RAM_BURST_ON;
         
         fetch_x <= 0;
-        fetch_x2 <= glitchx2_reg;
       end
     end
     
@@ -1856,20 +1864,20 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if (fetch_x >= screen_w_with_margin) begin
+      if (fetch_x >= (fetch_w+margin_x) /*screen_w_with_margin*/) begin
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
         
       end else if (data_out_ready) begin
         ram_addr  <= ram_addr + 1'b1; // burst incremented
-      
-        fetch_x <= fetch_x + 1'b1;
-        fetch_x2 <= fetch_x2 + 1'b1;
         
-        fetch_buffer[fetch_x] <= ram_data_out;
-      end
-      ram_enable <= 1; // move dst
+        fetch_x <= fetch_x + 1'b1;
+        
+        fetch_buffer[fetch_x-margin_x] <= ram_data_out;
+        ram_enable <= 1; // move dst
+      end else
+        ram_enable <= 1; // move dst
     end
     
     RAM_BURST_OFF: begin
@@ -2130,8 +2138,8 @@ reg x_safe_area = 0;
 reg [1:0] x_safe_area_sync = 0;
 reg display_pixels = 0;
 
-reg[1:0] vga_scalemode_h = 0;
-reg[1:0] vga_scalemode_v = 0;
+reg vga_scalemode_h = 0;
+reg vga_scalemode_v = 0;
 reg[1:0] vga_colormode = 0;
 reg[4:0] vga_margin_x = 0;
 
@@ -2170,23 +2178,25 @@ always @(posedge vga_clk) begin
   vga_v_sync_end <= v_sync_end;
 end
 
-always @(posedge vga_clk) begin
+reg [9:0] counter_scanout = 0;
+reg [9:0] counter_px = 0;
+reg [12:0] scanout_wrapx = FETCHW-1;
+reg [2:0] counter_scanout_incr = 0;
+reg [2:0] max_scanout_incr = 0;
+reg counter_vscale = 0;
 
-  x_safe_area <= (counter_x > vga_h_max-safe_x2);
+always @(posedge vga_clk) begin
+  x_safe_area <= (counter_scanout > fetch_w-safe_x2);
   
   if (counter_x > vga_h_max) begin
     counter_x <= 0;
     if (counter_y > vga_v_max) begin
       counter_y <= 0;
-    end else
+    end else begin
       counter_y <= counter_y + 1'b1;
+    end
   end else begin
     counter_x <= counter_x + 1'b1;
-    if (counter_x > vga_h_max-fetch_preroll)
-      if (counter_y < vga_screen_h)
-        need_row_fetch_y <= (counter_y+1'b1)>>vga_scalemode_v;
-      else
-        need_row_fetch_y <= 0;
   end
   
   if (counter_x>=vga_h_sync_start && counter_x<vga_h_sync_end)
@@ -2205,109 +2215,66 @@ always @(posedge vga_clk) begin
     dvi_blank <= 1;
   end
   
-  if ((counter_y<vga_screen_h || counter_y>=vga_v_max) && (counter_x>=vga_h_max || counter_x<vga_h_rez))
+  if (vga_colormode==0)
+    max_scanout_incr <= {vga_scalemode_h,1'b1};
+  else
+    max_scanout_incr <= vga_scalemode_h;
+  
+  
+  if (counter_y < vga_screen_h) begin
+    if (counter_x < vga_h_rez) begin
+      if (counter_scanout_incr == max_scanout_incr) begin
+        counter_scanout_incr <= 0;
+        counter_px <= (counter_px + 1'b1);
+        
+        // counter_vscale is never 1 here?!
+        if ((counter_vscale==0) || (vga_scalemode_v==0)) begin
+          counter_scanout <= (counter_scanout + 1'b1);
+          if (counter_scanout == fetch_preroll)
+            need_row_fetch_y <= need_row_fetch_y+1'b1;
+        end
+      end else begin
+        counter_scanout_incr <= counter_scanout_incr + 1'b1;
+      end
+    end else
+      counter_px <= 0;
+  end else begin
+    need_row_fetch_y <= 0;
+    counter_scanout <= 0;
+    counter_scanout_incr <= 0;
+    counter_vscale <= 0;
+    counter_px <= 0;
+  end
+  
+  if (counter_x == 0) begin
+    counter_vscale <= ~counter_vscale;
+    counter_px <= 0;
+  end
+  
+  if ((counter_y<vga_screen_h || counter_y>=vga_v_max) 
+      && (counter_x>=vga_h_max || counter_x<vga_h_rez))
     display_pixels <= 1;
   else begin
     display_pixels <= 0;
     preheat <= 1;
     counter_scale <= vga_scalemode_h;
     counter_8x <= vga_margin_x;
-    counter_x_hi <= 0;
+    counter_x_hi <= 1;
     display_x2 <= {vga_margin_x,1'b0};
     display_x3 <= {vga_margin_x,1'b1};
   end
   
-`ifdef ANALYZER
-  if (counter_y>=590) begin
-    /*if (counter_x<110) begin
-      if (zorro_state[4]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<120) begin
-      if (zorro_state[3]) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<130) begin
-      if (zorro_state[2]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<140) begin
-      if (zorro_state[1]) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<150) begin
-      if (zorro_state[0]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<160) begin
-      green_p <= 0;
-    
-    end else if (counter_x<170) begin
-      if (ram_arbiter_state[4]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<180) begin
-      if (ram_arbiter_state[3]) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<190) begin
-      if (ram_arbiter_state[2]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<200) begin
-      if (ram_arbiter_state[1]) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<210) begin
-      if (ram_arbiter_state[0]) green_p <= 8'hff;
-      else green_p <= 8'h20;
-      
-    end else if (counter_x<220) begin
-      green_p <= 0;
-    end else if (counter_x<230) begin
-      if (zorro_ram_write_request) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<240) begin
-      if (ram_enable) green_p <= 8'hff;
-      else green_p <= 8'h20;
-    end else if (counter_x<250) begin
-      if (zorro_ram_read_request) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else if (counter_x<260) begin
-      if (zorro_ram_read_done) green_p <= 8'hff;
-      else green_p <= 8'h40;
-    end else begin
-      green_p <= 0;
-      blue_p <= 0;
-    end*/
-    
-    if (counter_y<600) begin
-      if (rec_zreadraw[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<610) begin
-      if (rec_zread[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<620) begin
-      if (rec_zwrite[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<630) begin
-      if (rec_zas0[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<640) begin
-      if (rec_zas1[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<650) begin
-      if (rec_zaddr_in_ram[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else if (counter_y<660) begin
-      if (rec_state[counter_x]) blue_p <= 8'hff;
-      else blue_p <= 0;
-    end else if (counter_y<670) begin
-      if (rec_statew[counter_x]) blue_p <= 8'hff;
-      else blue_p <= 0;
-    end else if (counter_y<680) begin
-      if (rec_ready[counter_x]) blue_p <= 8'hff;
-      else blue_p <= 0;
-    end else if (counter_y<690) begin
-      if (rec_endcycle[counter_x]) green_p <= 8'hff;
-      else green_p <= 0;
-    end else begin
-      green_p <= 0;
-      blue_p <= 0;
-    end
-  end else
-`endif
+  if (vga_scalemode_v == 0 || counter_vscale == 0) begin
+    rgb <= fetch_buffer[counter_scanout];
+    if (counter_x<640)
+      scale_buffer[counter_px] <= rgb;
+  end else begin
+    if (counter_x<640)
+      rgb <= scale_buffer[counter_px+1-vga_scalemode_h];
+    else
+      rgb <= 0;
+  end
+  
   if (!display_pixels) begin
     red_p   <= 0;
     green_p <= 0;
@@ -2325,34 +2292,28 @@ always @(posedge vga_clk) begin
     end else if (counter_scale != vga_scalemode_h) begin
       counter_scale <= counter_scale + 1'b1;
     end else if (counter_x_hi==1) begin
-      red_p   <= palette_r[fetch_buffer[counter_8x][7:0]];
-      green_p <= palette_g[fetch_buffer[counter_8x][7:0]];
-      blue_p  <= palette_b[fetch_buffer[counter_8x][7:0]];
-      counter_8x <= counter_8x + 1'b1;
+    
+      red_p   <= palette_r[rgb[7:0]];
+      green_p <= palette_g[rgb[7:0]];
+      blue_p  <= palette_b[rgb[7:0]];
+      
       counter_x_hi <= 0;
       counter_scale <= 0;
     end else begin
-      red_p   <= palette_r[fetch_buffer[counter_8x][15:8]];
-      green_p <= palette_g[fetch_buffer[counter_8x][15:8]];
-      blue_p  <= palette_b[fetch_buffer[counter_8x][15:8]];
+      red_p   <= palette_r[rgb[15:8]];
+      green_p <= palette_g[rgb[15:8]];
+      blue_p  <= palette_b[rgb[15:8]];
+      
       counter_x_hi <= 1;
       counter_scale <= 0;
     end
   end else if (vga_colormode==1) begin
     // decode 16 to 24 bit color
-    if (counter_scale != vga_scalemode_h) begin
-      counter_scale <= counter_scale + 1'b1;
-    end else begin
-      counter_scale <= 0;
-      rgb <= fetch_buffer[counter_8x];
-      counter_8x <= counter_8x + 1'b1;
-    end
-    
     red_p   <= {rgb[4:0],  rgb[4:2]};
     green_p <= {rgb[10:5], rgb[10:9]};
     blue_p  <= {rgb[15:11],rgb[15:13]};
     
-  end else if (vga_colormode==2) begin
+  /*end else if (vga_colormode==2) begin
     // true color
     if (counter_scale != vga_scalemode_h) begin
       counter_scale <= counter_scale + 1'b1;
@@ -2366,7 +2327,7 @@ always @(posedge vga_clk) begin
     rgb32 <= {fetch_buffer[display_x3],fetch_buffer[display_x2]};
     red_p   <= rgb32[15:8];
     green_p <= rgb32[7:0];
-    blue_p <= rgb32[31:24];
+    blue_p <= rgb32[31:24];*/
   end else begin
     red_p   <= 0;
     green_p <= 0;
