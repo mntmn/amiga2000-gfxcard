@@ -212,7 +212,8 @@ reg  [1:0]  ram_byte_enable;
 
 parameter FETCHW = 1024;
 reg  [15:0] fetch_buffer [0:(FETCHW+40)];
-reg  [15:0] scale_buffer [0:640];
+reg  [23:0] scale_buffer [0:639];
+reg  [15:0] sb0;
 reg  [11:0] fetch_x = 0;
 
 reg  [23:0] fetch_y = 0;
@@ -235,8 +236,9 @@ reg [15:0] blitter_row_pitch = 2048;
 reg [3:0] blitter_row_pitch_shift = 11; // 2048 = 1<<11
 
 // custom refresh mechanism
-reg [15:0] refresh_counter = 0;
 reg [23:0] refresh_addr = 0;
+reg [23:0] refresh_counter = 0;
+reg [23:0] refresh_max = 'h100;
 
 // SDRAM
 SDRAM_Controller_v sdram(
@@ -470,7 +472,7 @@ reg [7:0] dataout_time = 'h02;
 reg [7:0] datain_time = 'h10;
 reg [7:0] datain_counter = 0;
 
-reg [4:0] margin_x = 8;
+reg [4:0] margin_x = 10;
 reg [10:0] safe_x1 = 0;
 reg [10:0] safe_x2 = 'h220; //'h60;
 
@@ -490,6 +492,7 @@ reg [15:0] blitter_rgb32 [0:1];
 reg blitter_rgb32_t = 0;
 reg [2:0]  blitter_enable = 0; // 2a
 reg [23:0] blitter_base = 0;
+reg [23:0] blitter_base2 = 0;
 reg [23:0] blitter_ptr = 0;
 reg [23:0] blitter_ptr2 = 0;
 
@@ -937,6 +940,8 @@ always @(posedge z_sample_clk) begin
 
     RESET: begin
       vga_clk_sel  <= 1;
+      refresh_counter <= 0;
+      refresh_max <= 'h1000;
       
       // new default mode is 640x480 wrapped in 800x600@60hz
       screen_w     <= videocap_default_w;
@@ -1199,6 +1204,7 @@ always @(posedge z_sample_clk) begin
       z3_reg_high  <= z3_ram_low + reg_size;
       
       z_confout <= 1;
+      refresh_max <= 'h100;
       
       sdram_reset <= 0;
       blitter_enable <= 1;
@@ -1709,19 +1715,23 @@ always @(posedge z_sample_clk) begin
           v_rez    <= regdata_in[11:0];
         end
         
-        //'h0a: dataout_time <= regdata_in[7:0];
+        'h0a: begin
+          refresh_max[23:8] <= regdata_in[15:0];
+          refresh_counter <= 0;
+        end
+        
         'h0c: margin_x <= regdata_in[9:0];
-        //'h0e: default_data <= regdata_in[15:0];
-        //'h10: preheat_x <= regdata_in[4:0];
-        //'h12: vsmax <= regdata_in[7:0];
-        //'h12: fetch_w <= regdata_in[15:0];
+        'h0e: colormode <= regdata_in[2:0];
+        
         'h10: safe_x1 <= regdata_in[10:0];
+        //'h12: fetch_w <= regdata_in[15:0];
         'h14: safe_x2 <= regdata_in[10:0];
         'h1a: fetch_preroll <= regdata_in[15:0];
         
         // blitter regs
-        'h1c: blitter_base[23:16] <= regdata_in[7:0];
-        'h1e: blitter_base[15:0]  <= regdata_in;
+        'h1c: blitter_row_pitch <= regdata_in;
+        'h1e: blitter_colormode <= regdata_in[2:0];
+        
         'h20: blitter_x1 <= regdata_in[15:0];
         'h22: blitter_y1 <= regdata_in[15:0];
         'h24: blitter_x2 <= regdata_in[15:0];
@@ -1738,8 +1748,8 @@ always @(posedge z_sample_clk) begin
           blitter_dirx <= (blitter_x3>blitter_x4)?1'b1:1'b0;
           blitter_diry <= (blitter_y3>blitter_y4)?1'b1:1'b0;
           
-          blitter_ptr  <= blitter_base + (blitter_y1 << blitter_row_pitch_shift);
-          blitter_ptr2 <= blitter_base + (blitter_y3 << blitter_row_pitch_shift);
+          blitter_ptr  <= blitter_base;
+          blitter_ptr2 <= blitter_base2;
           //blitter_ptr  <= blitter_base + (blitter_y1 * blitter_row_pitch);
           //blitter_ptr2 <= blitter_base + (blitter_y3 * blitter_row_pitch);
           blitter_rgb32_t <= 0;
@@ -1757,10 +1767,10 @@ always @(posedge z_sample_clk) begin
         'h3c: videocap_prex <= regdata_in[9:0];
         'h3e: videocap_voffset <= regdata_in[9:0];
         
-        'h42: blitter_row_pitch <= regdata_in;
-        'h44: blitter_row_pitch_shift <= regdata_in[4:0];
-        'h46: blitter_colormode <= regdata_in[2:0];
-        'h48: colormode <= regdata_in[2:0];
+        'h40: blitter_base[23:16] <= regdata_in[7:0];
+        'h42: blitter_base[15:0]  <= regdata_in;
+        'h44: blitter_base2[23:16] <= regdata_in[7:0];
+        'h46: blitter_base2[15:0] <= regdata_in;
         
         'h4a: begin
           dcm7_psincdec <= regdata_in[0];
@@ -1777,13 +1787,10 @@ always @(posedge z_sample_clk) begin
         //'h54: videocap_default_w <= regdata_in[9:0];
         //'h56: videocap_default_h <= regdata_in[9:0];
         
-        //'h5a: videocap_xpoint <= regdata_in[10:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
         
-        //'h5e: videocap_prex2 <= regdata_in[9:0];
-        //'h5e: screen_h <= regdata_in[11:0];
         
         // sd card regs
         'h60: sd_reset <= regdata_in[8];
@@ -1805,11 +1812,6 @@ always @(posedge z_sample_clk) begin
           dvid_reset <= 1;
         end
       
-`ifdef TRACE
-        'h80: begin
-          trace_1 <= 0;
-        end
-`endif
       endcase
     end
     
@@ -1841,7 +1843,7 @@ always @(posedge z_sample_clk) begin
       videocap_save_x2 <= 0;
     end
   end
-
+  
   case (ram_arbiter_state)
     RAM_READY: begin
       ram_enable <= 0;
@@ -1912,11 +1914,14 @@ always @(posedge z_sample_clk) begin
     RAM_BURST_OFF2: begin
       ram_enable <= 0;
       if (data_out_ready) begin
-        ram_arbiter_state <= RAM_REFRESH_PRE;
+        ram_arbiter_state <= RAM_ROW_FETCHED;
       end
     end
     
-    RAM_ROW_FETCHED:
+    RAM_ROW_FETCHED: begin
+      if (refresh_counter<refresh_max)
+        refresh_counter<=refresh_counter+1'b1;
+    
       if ((need_row_fetch_y_latched!=fetch_line_y) && x_safe_area_sync[1] && cmd_ready) begin
         row_fetched <= 0;
         fetch_x <= 0;
@@ -1925,6 +1930,10 @@ always @(posedge z_sample_clk) begin
         
       end else if (x_safe_area_sync[1]) begin
         // do nothing if in safe area
+        
+      end else if (refresh_counter==refresh_max && cmd_ready) begin
+        // refresh ram
+        ram_arbiter_state <= RAM_REFRESH_PRE;
         
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
@@ -1997,22 +2006,21 @@ always @(posedge z_sample_clk) begin
           videocap_line_saved <= 1;
         end
       end
+    end
     
     RAM_REFRESH_PRE: begin
-      if (cmd_ready) begin
-        ram_enable <= 1;
-        ram_write <= 0;
-        ram_byte_enable <= 'b11;
-        ram_addr <= refresh_addr;
-        refresh_addr <= refresh_addr + 512;
-        ram_arbiter_state <= RAM_REFRESH;
-        refresh_counter <= 0;
-      end
+      refresh_counter <= 0;
+      ram_enable <= 1;
+      ram_write <= 0;
+      ram_byte_enable <= 'b11;
+      ram_addr <= refresh_addr;
+      refresh_addr <= refresh_addr + 512;
+      ram_arbiter_state <= RAM_REFRESH;
     end
     
     RAM_REFRESH: begin
-      ram_enable <= 0;
       if (data_out_ready) begin
+        ram_enable <= 0;
         ram_arbiter_state <= RAM_ROW_FETCHED;
       end
     end
@@ -2290,16 +2298,17 @@ always @(posedge vga_clk) begin
     rgb  <= fetch_buffer[counter_scanout];
     rgb2 <= fetch_buffer[counter_scanout+1'b1];
     
-    scale_buffer[counter_x] <= rgb;
+    if (counter_x<=vga_h_rez)
+      scale_buffer[counter_x] <= {rgb2[15:8],rgb};
+      //scale_buffer[counter_px] <= rgb2;
+    if (counter_x==0)
+      sb0 <= rgb;
   end else begin
-    //if (counter_x<vga_h_rez) begin
-      rgb <= scale_buffer[counter_x+1'b1];
-      //rgb2 <= scale_buffer[counter_px+1'b1];
-      rgb2 <= 0;
-    //end else begin
-    //  rgb <= 0;
-    //  rgb2 <= 0;
-    //end
+    if (counter_x<vga_h_rez) begin
+      rgb  <= scale_buffer[counter_px][15:0];
+      rgb2 <= {scale_buffer[counter_px][23:16],8'b00000000};
+    end else
+      rgb <= sb0;
   end
   
   if (!display_pixels) begin
