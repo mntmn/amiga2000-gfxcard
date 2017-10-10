@@ -211,8 +211,8 @@ reg  ram_write_burst = 0;
 reg  [1:0]  ram_byte_enable;
 
 parameter FETCHW = 1024;
-reg  [15:0] fetch_buffer [0:(FETCHW+20)];
-reg  [15:0] scale_buffer [0:639];
+reg  [15:0] fetch_buffer [0:(FETCHW+40)];
+reg  [15:0] scale_buffer [0:640];
 reg  [11:0] fetch_x = 0;
 
 reg  [23:0] fetch_y = 0;
@@ -225,11 +225,11 @@ reg [10:0] glitchx2_reg = 'h1fd;
 reg [8:0]  ram_burst_col = 'h1fe; //'b111111010;
 
 reg [15:0] fetch_w = FETCHW;
-reg [15:0] fetch_preroll = FETCHW-64;
+reg [15:0] fetch_preroll = 1;//'h3ff;
 //parameter fetch_preroll = 64;
 
-reg [15:0] row_pitch = 2048;
-reg [3:0] row_pitch_shift = 11; // 2048 = 1<<11
+reg [15:0] row_pitch = 1024;
+reg [3:0] row_pitch_shift = 10; // 1024 = 1<<10
 
 reg [15:0] blitter_row_pitch = 2048;
 reg [3:0] blitter_row_pitch_shift = 11; // 2048 = 1<<11
@@ -277,9 +277,15 @@ SDRAM_Controller_v sdram(
 reg [7:0] red_p;
 reg [7:0] green_p;
 reg [7:0] blue_p;
+reg [7:0] red_p_dly;
+reg [7:0] green_p_dly;
+reg [7:0] blue_p_dly;
 reg dvi_vsync;
 reg dvi_hsync;
 reg dvi_blank;
+reg dvi_vsync_dly;
+reg dvi_hsync_dly;
+reg dvi_blank_dly;
 reg [3:0] tmds_out_pbuf;
 reg [3:0] tmds_out_nbuf;
 assign TMDS_out_P = tmds_out_pbuf;
@@ -440,7 +446,6 @@ reg [2:0] colormode = 1;
 reg [2:0] blitter_colormode = 1;
 reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
-reg [1:0] counter_scale = 0;
 
 reg [15:0] REVISION = 72; // 1.7.2
 
@@ -467,7 +472,7 @@ reg [7:0] datain_counter = 0;
 
 reg [4:0] margin_x = 8;
 reg [10:0] safe_x1 = 0;
-reg [10:0] safe_x2 = 'h010; //'h60;
+reg [10:0] safe_x2 = 'h220; //'h60;
 
 // blitter registers
 reg [15:0] blitter_x1 = 0; // 20
@@ -603,6 +608,7 @@ reg [9:0] videocap_hs = 0;
 reg [9:0] videocap_hs2 = 0;
 reg [9:0] videocap_vs = 0;
 reg [2:0] videocap_state = 0;
+reg [9:0] videocap_xpoint = 'h27e; //'h3ff;
 reg [9:0] videocap_save_x = 0;
 reg [9:0] videocap_save_x2 = 0;
 reg [9:0] videocap_line_saved_y = 0;
@@ -618,7 +624,7 @@ reg [9:0]  videocap_voffset = 'h2a;
 reg [9:0] videocap_prex = 'h41;
 reg [9:0] videocap_prex2 = 0;
 reg [9:0] videocap_height = 'h200; //'h117; // 'h127;
-reg [8:0] videocap_width = 320;
+reg [8:0] videocap_width = 320; //318; // FIXME
 
 reg [7:0] vscount = 0;
 reg vsynced = 0;
@@ -945,11 +951,16 @@ always @(posedge z_sample_clk) begin
       v_sync_end   <= 604;
       v_max        <= 631;
       
-      row_pitch    <= 640; //1024;
+      row_pitch    <= 1024;
       row_pitch_shift <= 10;
+      
+      safe_x1 <= 0;
+      safe_x2 <= 'h220;
+      fetch_preroll <= 1;
       
       videocap_mode <= 0;
       dvid_reset <= 1;
+      aligned_row_mode <= 1;
       
       scalemode_h <= 0;
       scalemode_v <= 0; //1;
@@ -959,6 +970,7 @@ always @(posedge z_sample_clk) begin
       blitter_base <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
       pan_ptr <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
       margin_x <= 10;
+      fetch_preroll <= 1;
       
       blitter_x1 <= 0;
       blitter_y1 <= 0; 
@@ -1702,9 +1714,9 @@ always @(posedge z_sample_clk) begin
         //'h0e: default_data <= regdata_in[15:0];
         //'h10: preheat_x <= regdata_in[4:0];
         //'h12: vsmax <= regdata_in[7:0];
-        'h12: fetch_w <= regdata_in[15:0];
+        //'h12: fetch_w <= regdata_in[15:0];
+        'h10: safe_x1 <= regdata_in[10:0];
         'h14: safe_x2 <= regdata_in[10:0];
-        //'h14: scanout_wrapx <= regdata_in[15:0];
         'h1a: fetch_preroll <= regdata_in[15:0];
         
         // blitter regs
@@ -1756,17 +1768,22 @@ always @(posedge z_sample_clk) begin
         end
         'h4c: dcm7_rst <= 1'b1;
         
-        'h4e: videocap_mode <= regdata_in[0];
-        'h50: videocap_width <= regdata_in[9:0];
-        'h52: videocap_height <= regdata_in[9:0];
-        'h54: videocap_default_w <= regdata_in[9:0];
-        'h56: videocap_default_h <= regdata_in[9:0];
+        'h4e: begin
+          videocap_mode <= regdata_in[0];
+          aligned_row_mode <= regdata_in[0];
+        end
+        //'h50: videocap_width <= regdata_in[9:0];
+        //'h52: videocap_height <= regdata_in[9:0];
+        //'h54: videocap_default_w <= regdata_in[9:0];
+        //'h56: videocap_default_h <= regdata_in[9:0];
+        
+        //'h5a: videocap_xpoint <= regdata_in[10:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
         
         //'h5e: videocap_prex2 <= regdata_in[9:0];
-        'h5e: screen_h <= regdata_in[11:0];
+        //'h5e: screen_h <= regdata_in[11:0];
         
         // sd card regs
         'h60: sd_reset <= regdata_in[8];
@@ -1788,12 +1805,11 @@ always @(posedge z_sample_clk) begin
           dvid_reset <= 1;
         end
       
-`ifdef TRACE      
+`ifdef TRACE
         'h80: begin
           trace_1 <= 0;
         end
 `endif
-        
       endcase
     end
     
@@ -1819,8 +1835,8 @@ always @(posedge z_sample_clk) begin
         && videocap_line_saved==1) begin
       videocap_line_saved <= 0;
       videocap_line_saved_y <= videocap_y3;
-      //videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<row_pitch_shift);
-      videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)*640);
+      videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<10);
+      //videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)*640);
       videocap_save_x <= 0;
       videocap_save_x2 <= 0;
     end
@@ -1864,16 +1880,15 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if (fetch_x >= (fetch_w+margin_x) /*screen_w_with_margin*/) begin
+      if ((fetch_x >= (fetch_w+margin_x))              /* 654 */
+          || (aligned_row_mode==1 && fetch_x >= (screen_w+margin_x))) begin
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
         
       end else if (data_out_ready) begin
         ram_addr  <= ram_addr + 1'b1; // burst incremented
-        
         fetch_x <= fetch_x + 1'b1;
-        
         fetch_buffer[fetch_x-margin_x] <= ram_data_out;
         ram_enable <= 1; // move dst
       end else
@@ -1897,7 +1912,7 @@ always @(posedge z_sample_clk) begin
     RAM_BURST_OFF2: begin
       ram_enable <= 0;
       if (data_out_ready) begin
-        ram_arbiter_state <= RAM_ROW_FETCHED;
+        ram_arbiter_state <= RAM_REFRESH_PRE;
       end
     end
     
@@ -1984,18 +1999,22 @@ always @(posedge z_sample_clk) begin
       end
     
     RAM_REFRESH_PRE: begin
-      ram_enable <= 1;
-      ram_write <= 0;
-      ram_byte_enable <= 'b11;
-      ram_addr <= refresh_addr;
-      refresh_addr <= refresh_addr + 512;
-      ram_arbiter_state <= RAM_REFRESH;
-      refresh_counter <= 0;
+      if (cmd_ready) begin
+        ram_enable <= 1;
+        ram_write <= 0;
+        ram_byte_enable <= 'b11;
+        ram_addr <= refresh_addr;
+        refresh_addr <= refresh_addr + 512;
+        ram_arbiter_state <= RAM_REFRESH;
+        refresh_counter <= 0;
+      end
     end
     
     RAM_REFRESH: begin
       ram_enable <= 0;
-      ram_arbiter_state <= RAM_BURST_OFF;
+      if (data_out_ready) begin
+        ram_arbiter_state <= RAM_ROW_FETCHED;
+      end
     end
     
     RAM_BLIT_WRITE: begin
@@ -2124,13 +2143,9 @@ always @(posedge z_sample_clk) begin
   dvid_reset_sync <= {dvid_reset_sync[0],dvid_reset};
 end
 
-reg[23:0] rgb = 'h000000;
-reg[31:0] rgb32 = 'h00000000;
+reg[15:0] rgb = 'h0000;
+reg[15:0] rgb2 = 'h0000;
 reg[11:0] counter_8x = 0;
-reg counter_x_hi = 0;
-reg scale_xc = 0;
-reg[7:0] pidx1;
-reg[7:0] pidx2;
 
 reg display_sprite = 0;
 reg preheat = 0;
@@ -2180,13 +2195,15 @@ end
 
 reg [9:0] counter_scanout = 0;
 reg [9:0] counter_px = 0;
-reg [12:0] scanout_wrapx = FETCHW-1;
-reg [2:0] counter_scanout_incr = 0;
-reg [2:0] max_scanout_incr = 0;
+reg [2:0] counter_repeat = 0;
+reg [2:0] counter_repeat_delayed = 0;
+reg [1:0] counter_scanout_words = 1;
+reg [1:0] max_repeat = 0;
 reg counter_vscale = 0;
+reg aligned_row_mode = 1;
 
 always @(posedge vga_clk) begin
-  x_safe_area <= (counter_scanout > fetch_w-safe_x2);
+  x_safe_area <= ((counter_scanout > safe_x2) || (counter_scanout < safe_x1));
   
   if (counter_x > vga_h_max) begin
     counter_x <= 0;
@@ -2216,63 +2233,73 @@ always @(posedge vga_clk) begin
   end
   
   if (vga_colormode==0)
-    max_scanout_incr <= {vga_scalemode_h,1'b1};
+    if (vga_scalemode_h==1)
+      max_repeat <= 3;
+    else
+      max_repeat <= 1;
   else
-    max_scanout_incr <= vga_scalemode_h;
+    if (vga_scalemode_h==1)
+      max_repeat <= 1;
+    else
+      max_repeat <= 0;
   
-  
-  if (counter_y < vga_screen_h) begin
-    if (counter_x < vga_h_rez) begin
-      if (counter_scanout_incr == max_scanout_incr) begin
-        counter_scanout_incr <= 0;
-        counter_px <= (counter_px + 1'b1);
+  if (vga_colormode==2)
+    counter_scanout_words <= 2;
+  else
+    counter_scanout_words <= 1;
+
+  if ((counter_y < vga_screen_h) || ((counter_x > vga_h_max) && counter_y>vga_v_max)) begin
+    if ((counter_x < vga_h_rez-1) || ((counter_x > vga_h_max) && counter_y!=vga_screen_h-1)) begin
+      display_pixels <= 1;
+    
+      if (counter_repeat == max_repeat) begin
+        counter_repeat <= 0;
+        counter_px <= (counter_px + counter_scanout_words);
         
-        // counter_vscale is never 1 here?!
-        if ((counter_vscale==0) || (vga_scalemode_v==0)) begin
-          counter_scanout <= (counter_scanout + 1'b1);
+        if (counter_vscale==0) begin
+          counter_scanout <= (counter_scanout + counter_scanout_words);
           if (counter_scanout == fetch_preroll)
             need_row_fetch_y <= need_row_fetch_y+1'b1;
         end
-      end else begin
-        counter_scanout_incr <= counter_scanout_incr + 1'b1;
-      end
-    end else
+      end else
+        counter_repeat <= counter_repeat+1'b1;
+      
+    end else begin
       counter_px <= 0;
+      if (aligned_row_mode)
+        counter_scanout <= 0;
+      display_pixels <= 0;
+    end
+    
+    if ((counter_x == vga_h_rez) && (vga_scalemode_v==1)) begin
+      counter_vscale <= ~counter_vscale;
+    end
   end else begin
     need_row_fetch_y <= 0;
+    display_pixels <= 0;
+    
     counter_scanout <= 0;
-    counter_scanout_incr <= 0;
     counter_vscale <= 0;
     counter_px <= 0;
+    counter_repeat <= 0;
   end
-  
-  if (counter_x == 0) begin
-    counter_vscale <= ~counter_vscale;
-    counter_px <= 0;
-  end
-  
-  if ((counter_y<vga_screen_h || counter_y>=vga_v_max) 
-      && (counter_x>=vga_h_max || counter_x<vga_h_rez))
-    display_pixels <= 1;
-  else begin
-    display_pixels <= 0;
-    preheat <= 1;
-    counter_scale <= vga_scalemode_h;
-    counter_8x <= vga_margin_x;
-    counter_x_hi <= 1;
-    display_x2 <= {vga_margin_x,1'b0};
-    display_x3 <= {vga_margin_x,1'b1};
-  end
+
+  counter_repeat_delayed <= counter_repeat;
   
   if (vga_scalemode_v == 0 || counter_vscale == 0) begin
-    rgb <= fetch_buffer[counter_scanout];
-    if (counter_x<640)
-      scale_buffer[counter_px] <= rgb;
+    rgb  <= fetch_buffer[counter_scanout];
+    rgb2 <= fetch_buffer[counter_scanout+1'b1];
+    
+    scale_buffer[counter_x] <= rgb;
   end else begin
-    if (counter_x<640)
-      rgb <= scale_buffer[counter_px+1-vga_scalemode_h];
-    else
-      rgb <= 0;
+    //if (counter_x<vga_h_rez) begin
+      rgb <= scale_buffer[counter_x+1'b1];
+      //rgb2 <= scale_buffer[counter_px+1'b1];
+      rgb2 <= 0;
+    //end else begin
+    //  rgb <= 0;
+    //  rgb2 <= 0;
+    //end
   end
   
   if (!display_pixels) begin
@@ -2284,28 +2311,20 @@ always @(posedge vga_clk) begin
     // 0: +0a +0b +1a
     // 1: +0b +1a +1b
     
-    if (preheat) begin
+    /*if (preheat) begin
       red_p <= 0;
       green_p <= 0;
       blue_p <= 0;
       preheat <= 0;
-    end else if (counter_scale != vga_scalemode_h) begin
-      counter_scale <= counter_scale + 1'b1;
-    end else if (counter_x_hi==1) begin
-    
+    end else*/ 
+    if (counter_repeat_delayed[vga_scalemode_h]==1) begin
       red_p   <= palette_r[rgb[7:0]];
       green_p <= palette_g[rgb[7:0]];
       blue_p  <= palette_b[rgb[7:0]];
-      
-      counter_x_hi <= 0;
-      counter_scale <= 0;
     end else begin
       red_p   <= palette_r[rgb[15:8]];
       green_p <= palette_g[rgb[15:8]];
       blue_p  <= palette_b[rgb[15:8]];
-      
-      counter_x_hi <= 1;
-      counter_scale <= 0;
     end
   end else if (vga_colormode==1) begin
     // decode 16 to 24 bit color
@@ -2313,21 +2332,11 @@ always @(posedge vga_clk) begin
     green_p <= {rgb[10:5], rgb[10:9]};
     blue_p  <= {rgb[15:11],rgb[15:13]};
     
-  /*end else if (vga_colormode==2) begin
+  end else if (vga_colormode==2) begin
     // true color
-    if (counter_scale != vga_scalemode_h) begin
-      counter_scale <= counter_scale + 1'b1;
-    end else begin
-      counter_scale <= 0;
-      counter_8x <= counter_8x + 1'b1;
-      display_x2 <= display_x2 + 2'b10;
-      display_x3 <= display_x3 + 2'b10;
-    end
-    
-    rgb32 <= {fetch_buffer[display_x3],fetch_buffer[display_x2]};
-    red_p   <= rgb32[15:8];
-    green_p <= rgb32[7:0];
-    blue_p <= rgb32[31:24];*/
+    blue_p   <= rgb2[15:8];
+    green_p <= rgb[7:0];
+    red_p  <= rgb[15:8];
   end else begin
     red_p   <= 0;
     green_p <= 0;
