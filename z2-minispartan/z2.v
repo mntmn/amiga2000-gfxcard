@@ -237,8 +237,9 @@ reg [3:0] blitter_row_pitch_shift = 11; // 2048 = 1<<11
 
 // custom refresh mechanism
 reg [23:0] refresh_addr = 0;
-reg [23:0] refresh_counter = 0;
+reg [23:0] refresh_counter = 'h0;
 reg [23:0] refresh_max = 'h100;
+reg [23:0] refresh_saved_addr = 0;
 
 // SDRAM
 SDRAM_Controller_v sdram(
@@ -294,6 +295,7 @@ assign TMDS_out_P = tmds_out_pbuf;
 assign TMDS_out_N = tmds_out_nbuf;
 reg dvid_reset = 0;
 reg [1:0] dvid_reset_sync = 0;
+reg dvi_vsync_reg;
 
 `ifndef SIMULATION
 dvid_out dvid_out(
@@ -449,7 +451,7 @@ reg [2:0] blitter_colormode = 1;
 reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
 
-reg [15:0] REVISION = 72; // 1.7.2
+reg [15:0] REVISION = 82; // 1.8.2
 
 // memory map
 parameter reg_size = 32'h01000;
@@ -712,6 +714,9 @@ always @(posedge dcm7_180) begin
   end
 end
 
+reg [15:0] wraprow  = 16;
+reg [15:0] wraprow2 = 'h130;
+
 always @(posedge z_sample_clk) begin
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
   znLDS_sync  <= {znLDS_sync[1:0],znLDS};
@@ -741,7 +746,13 @@ always @(posedge z_sample_clk) begin
   data_in <= zD;
   zdata_in_sync <= data_in;
   
-  need_row_fetch_y_latched <= need_row_fetch_y;
+  if (videocap_mode) begin
+    if (need_row_fetch_y>((vga_screen_h>>vga_scalemode_v) - videocap_interlace)) // FIXME sync
+      need_row_fetch_y_latched <= 1;
+    else
+      need_row_fetch_y_latched <= need_row_fetch_y+1'b1;
+  end else
+    need_row_fetch_y_latched <= need_row_fetch_y;
   
   zaddr <= {zA[22:0],1'b0};
   zaddr_sync  <= zaddr;
@@ -817,6 +828,7 @@ always @(posedge z_sample_clk) begin
   data_z3_low16_latched <= data_z3_low16;
   dataout_z3_latched <= dataout_z3;
   dtack_latched <= dtack;
+  dvi_vsync_reg <= dvi_vsync;
   
   // RESET, CONFIG
   z_reset <= (znRST_sync==3'b000);
@@ -862,6 +874,7 @@ parameter RAM_BLIT_COPY_READ = 14;
 parameter RAM_BLIT_COPY_WRITE = 15;
 parameter RAM_WRITE_END1 = 16;
 parameter RAM_WRITE_END = 17;
+parameter RAM_REFRESH_END = 18;
 
 reg [11:0] need_row_fetch_y = 0;
 reg [11:0] need_row_fetch_y_latched = 0;
@@ -902,9 +915,14 @@ reg [15:0] default_data = 'hffff; // causes read/write glitches on A2000 (data b
 
 reg [31:0] coldstart_counter = 0;
 
+reg zorro_idle = 0;
+reg [11:0] counter_y_sync;
+
 always @(posedge z_sample_clk) begin
 
-  screen_w_with_margin <= (screen_w+margin_x);
+  zorro_idle <= ((zorro_state==Z2_IDLE)||(zorro_state==Z3_IDLE));
+  counter_y_sync <= counter_y;
+
   if (dcm7_psen==1'b1) dcm7_psen <= 1'b0;
   if (dcm7_rst==1'b1) dcm7_rst <= 1'b0;
 
@@ -940,8 +958,6 @@ always @(posedge z_sample_clk) begin
 
     RESET: begin
       vga_clk_sel  <= 1;
-      refresh_counter <= 0;
-      refresh_max <= 'h1000;
       
       // new default mode is 640x480 wrapped in 800x600@60hz
       screen_w     <= videocap_default_w;
@@ -1008,11 +1024,11 @@ always @(posedge z_sample_clk) begin
     
     DECIDE_Z2_Z3: begin
       // poor man's z3sense
-      /*if (zaddr_autoconfig) begin
+      if (zaddr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end else*/ if (z3addr_autoconfig) begin
+      end else if (z3addr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
@@ -1204,7 +1220,6 @@ always @(posedge z_sample_clk) begin
       z3_reg_high  <= z3_ram_low + reg_size;
       
       z_confout <= 1;
-      refresh_max <= 'h100;
       
       sdram_reset <= 0;
       blitter_enable <= 1;
@@ -1599,6 +1614,9 @@ always @(posedge z_sample_clk) begin
         'h58: begin
               rr_data[31:16] <= videocap_ymax;
               rr_data[15:0] <= 16'h0000; end
+        'h5c: begin
+              rr_data[31:16] <= 16'h0000;
+              rr_data[15:0]  <= dvi_vsync_reg; end
         'h60: begin 
               rr_data[31:16] <= {sd_busy_sync,8'h00};
               rr_data[15:0]  <= sd_read; end // 'h62
@@ -1614,6 +1632,8 @@ always @(posedge z_sample_clk) begin
         'h70: begin 
               rr_data[31:16] <= sd_error_sync; 
               rr_data[15:0]  <= sd_state; end
+              
+        
               
         // Autoboot ROM
         // See http://amigadev.elowar.com/read/ADCD_2.1/Libraries_Manual_guide/node041C.html
@@ -1716,8 +1736,7 @@ always @(posedge z_sample_clk) begin
         end
         
         'h0a: begin
-          refresh_max[23:8] <= regdata_in[15:0];
-          refresh_counter <= 0;
+          refresh_max[15:0] <= regdata_in[15:0];
         end
         
         'h0c: margin_x <= regdata_in[9:0];
@@ -1725,6 +1744,9 @@ always @(posedge z_sample_clk) begin
         
         'h10: safe_x1 <= regdata_in[10:0];
         //'h12: fetch_w <= regdata_in[15:0];
+        'h12: wraprow <= regdata_in[15:0];
+        'h16: wraprow2 <= regdata_in[15:0];
+        
         'h14: safe_x2 <= regdata_in[10:0];
         'h1a: fetch_preroll <= regdata_in[15:0];
         
@@ -1848,8 +1870,7 @@ always @(posedge z_sample_clk) begin
     RAM_READY: begin
       ram_enable <= 0;
       ram_arbiter_state <= RAM_READY2;
-      fetch_y <= pan_ptr + (fetch_line_y*fetch_w); // 512
-      //fetch_y <= pan_ptr + (fetch_line_y * row_pitch);
+      fetch_y <= pan_ptr + (fetch_line_y*fetch_w); // 1024
     end
     
     RAM_READY2: begin
@@ -1903,6 +1924,7 @@ always @(posedge z_sample_clk) begin
       if (cmd_ready) begin
         ram_enable <= 1;
         ram_write <= 0;
+        ram_byte_enable <= 1'b11;
         // homebrew ram refresh
         ram_addr <= refresh_addr;
         refresh_addr <= refresh_addr + 512;
@@ -1919,9 +1941,6 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_ROW_FETCHED: begin
-      if (refresh_counter<refresh_max)
-        refresh_counter<=refresh_counter+1'b1;
-    
       if ((need_row_fetch_y_latched!=fetch_line_y) && x_safe_area_sync[1] && cmd_ready) begin
         row_fetched <= 0;
         fetch_x <= 0;
@@ -1930,10 +1949,6 @@ always @(posedge z_sample_clk) begin
         
       end else if (x_safe_area_sync[1]) begin
         // do nothing if in safe area
-        
-      end else if (refresh_counter==refresh_max && cmd_ready) begin
-        // refresh ram
-        ram_arbiter_state <= RAM_REFRESH_PRE;
         
       // BLITTER ----------------------------------------------------------------
       end else if (blitter_enable==1 && cmd_ready) begin
@@ -2005,22 +2020,41 @@ always @(posedge z_sample_clk) begin
         end else begin
           videocap_line_saved <= 1;
         end
+      end else if (!videocap_mode 
+      && zorro_idle // FIXME mysterious
+      && counter_y_sync<wraprow2 //screen_h // FIXME
+      && counter_y_sync>wraprow
+      && cmd_ready) begin
+        if (refresh_counter<refresh_max) begin
+          refresh_counter <= refresh_counter + 1'b1;
+        end else begin
+          refresh_counter <= 0;
+          ram_enable <= 0;
+          ram_arbiter_state <= RAM_REFRESH_PRE;
+        end
       end
     end
     
     RAM_REFRESH_PRE: begin
-      refresh_counter <= 0;
-      ram_enable <= 1;
-      ram_write <= 0;
-      ram_byte_enable <= 'b11;
-      ram_addr <= refresh_addr;
-      refresh_addr <= refresh_addr + 512;
-      ram_arbiter_state <= RAM_REFRESH;
+      if (data_out_queue_empty && cmd_ready) begin
+        ram_write <= 0;
+        ram_enable <= 1;
+        ram_byte_enable <= 'b11;
+        ram_addr <= refresh_addr;
+        refresh_addr <= refresh_addr + 512;
+        ram_arbiter_state <= RAM_REFRESH;
+      end
     end
     
     RAM_REFRESH: begin
       if (data_out_ready) begin
         ram_enable <= 0;
+        ram_arbiter_state <= RAM_REFRESH_END;
+      end
+    end
+    
+    RAM_REFRESH_END: begin
+      if (data_out_queue_empty) begin
         ram_arbiter_state <= RAM_ROW_FETCHED;
       end
     end
@@ -2146,7 +2180,6 @@ always @(posedge z_sample_clk) begin
     
   endcase
   
-  
   vga_clk_sel0_latch <= {vga_clk_sel0_latch[0],vga_clk_sel[0]};
   dvid_reset_sync <= {dvid_reset_sync[0],dvid_reset};
 end
@@ -2175,6 +2208,7 @@ reg[11:0] vga_v_sync_end = 0;
 reg[11:0] vga_h_rez = 0;
 reg[11:0] vga_v_rez = 0;
 reg[11:0] vga_screen_h = 0;
+reg vga_reset = 0;
 
 always @(posedge vga_clk) begin
   // clock domain sync
@@ -2199,6 +2233,7 @@ always @(posedge vga_clk) begin
   vga_h_sync_end <= h_sync_end;
   vga_v_sync_start <= v_sync_start;
   vga_v_sync_end <= v_sync_end;
+  vga_reset <= dvid_reset;
 end
 
 reg [9:0] counter_scanout = 0;
@@ -2212,8 +2247,17 @@ reg aligned_row_mode = 1;
 
 always @(posedge vga_clk) begin
   x_safe_area <= ((counter_scanout > safe_x2) || (counter_scanout < safe_x1));
-  
-  if (counter_x > vga_h_max) begin
+
+  if (vga_reset) begin
+    counter_x <= 0;
+    counter_y <= 0;
+    need_row_fetch_y <= 0;
+    display_pixels <= 0;
+    counter_scanout <= 0;
+    counter_vscale <= 0;
+    counter_px <= 0;
+    counter_repeat <= 0;
+  end else if (counter_x > vga_h_max) begin
     counter_x <= 0;
     if (counter_y > vga_v_max) begin
       counter_y <= 0;
@@ -2256,7 +2300,8 @@ always @(posedge vga_clk) begin
   else
     counter_scanout_words <= 1;
 
-  if ((counter_y < vga_screen_h) || ((counter_x > vga_h_max) && counter_y>vga_v_max)) begin
+  if (/*!vga_reset && */
+      ((counter_y < vga_screen_h) || ((counter_x > vga_h_max) && counter_y>vga_v_max))) begin
     if ((counter_x < vga_h_rez-1) || ((counter_x > vga_h_max) && counter_y!=vga_screen_h-1)) begin
       display_pixels <= 1;
     
@@ -2285,7 +2330,6 @@ always @(posedge vga_clk) begin
   end else begin
     need_row_fetch_y <= 0;
     display_pixels <= 0;
-    
     counter_scanout <= 0;
     counter_vscale <= 0;
     counter_px <= 0;
@@ -2300,13 +2344,12 @@ always @(posedge vga_clk) begin
     
     if (counter_x<=vga_h_rez)
       scale_buffer[counter_x] <= {rgb2[15:8],rgb};
-      //scale_buffer[counter_px] <= rgb2;
     if (counter_x==0)
       sb0 <= rgb;
   end else begin
     if (counter_x<vga_h_rez) begin
-      rgb  <= scale_buffer[counter_px][15:0];
-      rgb2 <= {scale_buffer[counter_px][23:16],8'b00000000};
+      rgb  <= scale_buffer[counter_x+1'b1][15:0];
+      rgb2 <= {scale_buffer[counter_x+1'b1][23:16],8'b00000000};
     end else
       rgb <= sb0;
   end
