@@ -47,18 +47,18 @@ typedef volatile struct MNTVARegs {
   u16 screen_w;
   u16 screen_h; // 08
 
-  u16 dataout_time;
-  u16 margin_x;
-  u16 reserved_0e; // 0e
-  u16 preheat_x;
+  u16 refresh_max; // 0a
+  u16 margin_x; // 0c
+  u16 colormode; // 0e
+  u16 safe_x1; // 10
   u16 reserved_12; // 12
-  u16 safe_x;
+  u16 safe_x2; // 14
   u16 reserved_16; // 16
   u16 reserved_18; // 18
   u16 fetch_preroll; // 1a
 
-  u16 blitter_base_hi; // 1c,1e
-  u16 blitter_base_lo;
+  u16 blitter_row_pitch; // 1c
+  u16 blitter_colormode; // 1e
   u16 blitter_x1; // 20
   u16 blitter_y1;
   u16 blitter_x2;
@@ -76,16 +76,15 @@ typedef volatile struct MNTVARegs {
   u16 pan_ptr_hi; // 38,3a
   u16 pan_ptr_lo;
   
-  u16 reserved_3c;
-  u16 reserved_3e;
-  u16 reserved_40;
+  u16 videocap_prex; // 3c
+  u16 videocap_voffset; // 3e
   
-  u16 blitter_row_pitch; // 42
-  u16 blitter_row_pitch_shift; // 44
-  u16 blitter_colormode; // 46
-
-  u16 colormode; // 48
-
+  u16 blitter_src_hi; // 40
+  u16 blitter_src_lo; // 42
+  u16 blitter_dst_hi; // 44
+  u16 blitter_dst_lo; // 46
+  
+  u16 reserved_48;
   u16 reserved_4a;
   u16 reserved_4c;
   u16 capture_mode; // 4e
@@ -99,7 +98,7 @@ typedef volatile struct MNTVARegs {
   u16 reserved_5a;
   u16 row_pitch_shift; // 5c
 
-  u16 reserved_5e;
+  u16 vsync; // 5e
   
   u16 busy; // 60 also reset
   u16 read; // 62
@@ -120,15 +119,5 @@ typedef volatile struct MNTVARegs {
   u16 pixel_clk_sel; // 7c
 
   u16 reserved_7e;
-  
-  u32 trace_1; // 80
-  u32 trace_2; // 84
-  u32 trace_3; // 88
-  u16 trace_4; // 8c
-
-  u16 reserved_8e;
-
-  u32 trace_5;
-  u32 trace_6;
   
 } MNTVARegs;

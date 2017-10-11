@@ -328,9 +328,13 @@ void set_write_mask(__reg("a0") struct RTGBoard* b,__reg("d0")  uint8 m) {
 void set_clear_mask(__reg("a0") struct RTGBoard* b,__reg("d0")  uint8 m) {
 }
 void vsync_wait(__reg("a0") struct RTGBoard* b) {
+  MNTVARegs* registers = b->registers;
+  while (!registers->vsync) {
+  }
 }
 int is_vsynced(__reg("a0") struct RTGBoard* b,__reg("d0")  uint8 p) {
-  return 1;
+  MNTVARegs* registers = b->registers;
+  return registers->vsync;
 }
 void set_clock(__reg("a0") struct RTGBoard* b) {
 }
@@ -352,9 +356,10 @@ void set_palette(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 idx,__reg("d
 }
 
 uint16 calc_pitch_bytes(uint16 w, uint16 colormode) {
-  uint16 pitch = 2048;
-  if (w<=1024) pitch = 1024;
-
+  //uint16 pitch = 2048;
+  //if (w<=1024) pitch = 1024;
+  uint16 pitch = w;
+  
   pitch = pitch<<colormode;
   return pitch;
 }
@@ -458,6 +463,29 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   b->mode_info = m;
   b->border = border;
 
+  if (m->width<320 || m->height<200) return;
+
+  vsync_wait(b);
+
+  colormode = rtg_to_mnt_colormode(b->color_format);
+
+  registers->safe_x1 = 1;
+  if (colormode == MNTVA_COLOR_32BIT && m->width>1280) {
+    registers->safe_x1 = 0x10;
+    registers->safe_x2 = 0x300;
+    registers->fetch_preroll = 0x320;
+  } else if (colormode == MNTVA_COLOR_32BIT && m->width>800) {
+    registers->safe_x1 = 0x10;
+    registers->safe_x2 = 0x376;
+    registers->fetch_preroll = 0x390;
+  } else if (colormode != MNTVA_COLOR_32BIT && m->width==800) {
+    registers->safe_x2 = 0x3e0;
+    registers->fetch_preroll = 0x3f0;
+  } else {
+    registers->safe_x2 = 0x3d0;
+    registers->fetch_preroll = 0x3e0;
+  }
+
   if (m->height>360 || m->width>640) {
     scale = 0;
     w = m->width;
@@ -471,22 +499,21 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
     if (h<480) h=480;
   }
 
-  colormode = rtg_to_mnt_colormode(b->color_format);
-
   init_modeline(registers, w, h);
   init_mode_pitch(registers, w, colormode);
 
-  if (colormode==MNTVA_COLOR_8BIT) {
+  /*if (colormode==MNTVA_COLOR_8BIT) {
     registers->margin_x = 8; // CHECK
   } else if (colormode==MNTVA_COLOR_32BIT) {
     registers->margin_x = 4;
   } else {
     registers->margin_x = 8;
-  }
+  }*/
 
+  registers->margin_x = 8;
   registers->colormode = colormode;
 
-  registers->preheat_x = 1;
+  //registers->preheat_x = 1;
   registers->scalemode = (scale<<2) | scale; // vscale|hscale
   registers->screen_w = w;
   registers->screen_h = h;
@@ -526,34 +553,33 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
   
   if (state==0 && CX_ENABLED) {
     // capture amiga video to 16bit
-    registers->colormode = MNTVA_COLOR_16BIT565;
-    registers->scalemode = 0; //4; // scalemode x1:1, y2:1
     registers->pan_ptr_hi = 0xf8; // capture to the end of video memory
     registers->pan_ptr_lo = 0; // 0x9c00; // 9c00 = 39 rows of vertical offset
+
+    registers->safe_x1 = 0;
+    registers->safe_x2 = 0x220;
+    registers->fetch_preroll = 1;
+    registers->margin_x = 10;
 
     init_modeline(registers, registers->capture_default_screen_w, registers->capture_default_screen_h);
     init_mode_pitch(registers, registers->capture_default_screen_w, MNTVA_COLOR_16BIT565);
     registers->screen_w = registers->capture_default_screen_w; // default: 640
     registers->screen_h = registers->capture_default_screen_h; // default: 480
-    registers->line_w = 0x280;
-    registers->margin_x = 0xa;
-    registers->safe_x = 0x10;
 
-    registers->capture_mode = 0;
-    b->scratch[SCR_CAPMODE] = 0;
-
-    // clear the capture buffer
-    registers->blitter_base_hi = 0xf8;
-    registers->blitter_base_lo = 0; //0x9c00;
-    rect_fill(b, NULL, 0, 0, registers->capture_default_screen_w, registers->capture_default_screen_h, 0);
-    blitter_wait(b);
+    registers->colormode = MNTVA_COLOR_16BIT565;
+    registers->scalemode = 0; //4; // scalemode x1:1, y2:1
+    
+    //registers->line_w = 0x280;
+    
+    //registers->capture_mode = 0;
+    //b->scratch[SCR_CAPMODE] = 0;
 
     registers->capture_mode = 1;
     b->scratch[SCR_CAPMODE] = 1;
   } else {
     // rtg mode
     registers->capture_mode = 0;
-    registers->safe_x = 0x50;
+    //registers->safe_x = 0x50;
     
     b->scratch[SCR_CAPMODE] = 0;
     init_mode(b, b->mode_info, b->border);
@@ -578,16 +604,18 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   if (b->scratch[SCR_CAPMODE]==1) return;
   
   if (r) {
-    offset = (r->memory-(b->memory))>>1;
-    registers->blitter_base_hi = (offset&0xffff0000)>>16;
-    registers->blitter_base_lo = offset&0xffff;
+    offset = ((r->memory-(b->memory)) + y * r->pitch)>>1;
+    registers->blitter_src_hi = (offset&0xffff0000)>>16;
+    registers->blitter_src_lo = offset&0xffff;
     pitch = r->pitch;
     gfxmem = (uint8*)r->memory;
     color_format = r->color_format;
+  } else {
+    return;
   }
 
   registers->blitter_row_pitch = pitch>>1;
-  registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
+  //registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
     color8=color;
@@ -649,7 +677,7 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   MNTVARegs* registers = b->registers;
   uint16 pitch = 1024;
   uint32 color_format = b->color_format;
-  uint32 offset = 0;
+  uint32 offset = 0, y1, y3;
 
   registers->blitter_enable = 0;
 
@@ -657,15 +685,12 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   if (b->scratch[SCR_CAPMODE]==1) return;
 
   if (r) {
-    offset = (r->memory-(b->memory))>>1;
-    registers->blitter_base_hi = (offset&0xffff0000)>>16;
-    registers->blitter_base_lo = offset&0xffff;
     pitch = r->pitch;
     color_format = r->color_format;
   }
 
   registers->blitter_row_pitch = pitch>>1;
-  registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
+  //registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
     // fallback as long as 8-bit blitter is unstable
@@ -720,11 +745,15 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   }
 
   if (dy<y) {
+    y1 = dy;
+    y3 = y;
     registers->blitter_y1 = dy;
     registers->blitter_y2 = dy+h;
     registers->blitter_y3 = y;
-    registers->blitter_y4 = y+h;
+    registers->blitter_y4 = y+h;    
   } else {
+    y1 = dy+h;
+    y3 = y+h;
     registers->blitter_y1 = dy+h;
     registers->blitter_y2 = dy;
     registers->blitter_y3 = y+h;
@@ -741,6 +770,17 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
     registers->blitter_x2 = dx;
     registers->blitter_x3 = x+w;
     registers->blitter_x4 = x;
+  }
+
+  if (r) {
+    offset = ((r->memory-(b->memory)) + y1 * r->pitch)>>1;
+    registers->blitter_src_hi = (offset&0xffff0000)>>16;
+    registers->blitter_src_lo = offset&0xffff;
+    offset = ((r->memory-(b->memory)) + y3 * r->pitch)>>1;
+    registers->blitter_dst_hi = (offset&0xffff0000)>>16;
+    registers->blitter_dst_lo = offset&0xffff;
+  } else {
+    return;
   }
 
   registers->blitter_enable = 2;
