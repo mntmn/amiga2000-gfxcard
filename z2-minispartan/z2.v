@@ -2,7 +2,7 @@
 // Company: MNT Media and Technology UG
 // Engineer: Lukas F. Hartmann (@mntmn)
 // Create Date:    21:49:19 03/22/2016 
-// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.7.2
+// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.8.3
 // Module Name:    z2
 // Target Devices: 
 
@@ -233,13 +233,21 @@ reg [15:0] row_pitch = 1024;
 reg [3:0] row_pitch_shift = 10; // 1024 = 1<<10
 
 reg [15:0] blitter_row_pitch = 2048;
-reg [3:0] blitter_row_pitch_shift = 11; // 2048 = 1<<11
 
 // custom refresh mechanism
 reg [23:0] refresh_addr = 0;
-reg [23:0] refresh_counter = 'h0;
+reg [23:0] refresh_counter = 0;
 reg [23:0] refresh_max = 'h100;
 reg [23:0] refresh_saved_addr = 0;
+
+reg [4:0] refresh_warm_counter = 0;
+reg [4:0] refresh_warm_max = 10;
+reg [4:0] refresh_cool_counter = 0;
+reg [4:0] refresh_cool_max = 10;
+reg [4:0] ram_fetch_delay_counter = 0;
+reg [4:0] ram_fetch_delay_max = 0;
+reg [4:0] ram_fetch_delay2_counter = 0;
+reg [4:0] ram_fetch_delay2_max = 0;
 
 // SDRAM
 SDRAM_Controller_v sdram(
@@ -337,8 +345,9 @@ reg [11:0] screen_w_with_margin = 1280;
 // zorro port buffers / flags
 reg ZORRO3 = 1; 
 reg [23:0] zaddr; // zorro 2 address
-reg [31:0] zaddr_sync;
-reg [31:0] zaddr_sync2;
+reg [23:0] zaddr_sync;
+reg [23:0] zaddr_sync2;
+reg [23:0] zaddr_sync3;
 reg [23:0] z2_mapped_addr;
 reg [15:0] data;
 reg [15:0] data_in;
@@ -451,7 +460,7 @@ reg [2:0] blitter_colormode = 1;
 reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
 
-reg [15:0] REVISION = 82; // 1.8.2
+reg [15:0] REVISION = 83; // 1.8.3
 
 // memory map
 parameter reg_size = 32'h01000;
@@ -627,7 +636,6 @@ reg [9:0]  videocap_default_w = 640;
 reg [9:0]  videocap_default_h = 512; //480;
 reg [9:0]  videocap_voffset = 'h2a;
 reg [9:0] videocap_prex = 'h41;
-reg [9:0] videocap_prex2 = 0;
 reg [9:0] videocap_height = 'h200; //'h117; // 'h127;
 reg [8:0] videocap_width = 320; //318; // FIXME
 
@@ -714,8 +722,9 @@ always @(posedge dcm7_180) begin
   end
 end
 
-reg [15:0] wraprow  = 16;
-reg [15:0] wraprow2 = 'h130;
+reg videocap_interlace_sync = 0;
+reg vga_scalemode_v_sync = 0;
+reg[11:0] vga_screen_h_sync = 0;
 
 always @(posedge z_sample_clk) begin
   znUDS_sync  <= {znUDS_sync[1:0],znUDS};
@@ -745,9 +754,12 @@ always @(posedge z_sample_clk) begin
   
   data_in <= zD;
   zdata_in_sync <= data_in;
+  videocap_interlace_sync <= videocap_interlace;
+  vga_screen_h_sync <= vga_screen_h;
+  vga_scalemode_v_sync <= vga_scalemode_v;
   
   if (videocap_mode) begin
-    if (need_row_fetch_y>((vga_screen_h>>vga_scalemode_v) - videocap_interlace)) // FIXME sync
+    if (need_row_fetch_y>((vga_screen_h_sync>>vga_scalemode_v_sync) - videocap_interlace_sync))
       need_row_fetch_y_latched <= 1;
     else
       need_row_fetch_y_latched <= need_row_fetch_y+1'b1;
@@ -767,8 +779,8 @@ always @(posedge z_sample_clk) begin
   z2_lds <= (znLDS_sync==0);
   
   // CHECK
-  zaddr_in_ram <= (zaddr_sync==zaddr_sync2 && zaddr_sync2>=ram_low && zaddr_sync2<ram_high);
-  zaddr_in_reg <= (zaddr_sync==zaddr_sync2 && zaddr_sync2>=reg_low && zaddr_sync2<reg_high);
+  zaddr_in_ram <= (/*(zaddr_sync==zaddr_sync2) &&*/ zaddr_sync2>=ram_low && zaddr_sync2<ram_high);
+  zaddr_in_reg <= (/*(zaddr_sync==zaddr_sync2) &&*/ zaddr_sync2>=reg_low && zaddr_sync2<reg_high);
   if (znAS_sync[1]==0 && zaddr_sync2>=autoconf_low && zaddr_sync2<autoconf_high)
     zaddr_autoconfig <= 1'b1;
   else
@@ -815,8 +827,6 @@ always @(posedge z_sample_clk) begin
   else
     z3_din_latch <= 0;
 
-  //z3_end_cycle <= (z3_fcs_state==1); //(znFCS_sync[0]==1); //(znFCS_sync==3'b111);
-  
   // pipelined for better timing
   if (z3_din_latch) begin
     z3_din_high_s2 <= data_in; //zD;
@@ -875,6 +885,7 @@ parameter RAM_BLIT_COPY_WRITE = 15;
 parameter RAM_WRITE_END1 = 16;
 parameter RAM_WRITE_END = 17;
 parameter RAM_REFRESH_END = 18;
+parameter RAM_FETCH_DELAY_PRE = 19;
 
 reg [11:0] need_row_fetch_y = 0;
 reg [11:0] need_row_fetch_y_latched = 0;
@@ -978,18 +989,19 @@ always @(posedge z_sample_clk) begin
       safe_x1 <= 0;
       safe_x2 <= 'h220;
       fetch_preroll <= 1;
+      ram_fetch_delay2_max <= 0;
       
       videocap_mode <= 0;
       dvid_reset <= 1;
-      aligned_row_mode <= 1;
+      aligned_row_mode <= 0;
       
       scalemode_h <= 0;
-      scalemode_v <= 0; //1;
+      scalemode_v <= 0;
       colormode <= 1;
       blitter_colormode <= 1;
       
-      blitter_base <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
-      pan_ptr <= 'hf80000; //+(videocap_voffset<<10); // capture vertical offset
+      blitter_base <= 'hf80000; // capture vertical offset
+      pan_ptr <= 'hf80000; // capture vertical offset
       margin_x <= 10;
       fetch_preroll <= 1;
       
@@ -999,8 +1011,7 @@ always @(posedge z_sample_clk) begin
       blitter_y2 <= 4095;
       blitter_ptr <= 0;
       blitter_rgb <= 0;
-      blitter_row_pitch <= 4096;
-      blitter_row_pitch_shift <= 12;
+      blitter_row_pitch <= 4094;
       blitter_enable <= 0;
       
       ram_low   <= 'h600000;
@@ -1018,6 +1029,10 @@ always @(posedge z_sample_clk) begin
       z3_confdone <= 0;
       
       sd_reset <= 1;
+      sd_read <= 0;
+      sd_write <= 0;
+      sd_continue <= 0;
+      sd_handshake_in <= 0;
 
       zorro_state <= DECIDE_Z2_Z3;
     end
@@ -1222,13 +1237,12 @@ always @(posedge z_sample_clk) begin
       z_confout <= 1;
       
       sdram_reset <= 0;
-      blitter_enable <= 1;
+      blitter_enable <= 1; // clear mem
       
       zorro_state <= CONFIGURED_CLEAR;
     end
     
     CONFIGURED_CLEAR: begin
-      //videocap_mode <= 1;
       if (ZORRO3) begin
         zorro_state <= Z3_IDLE;
       end else begin
@@ -1612,8 +1626,8 @@ always @(posedge z_sample_clk) begin
               rr_data[31:16] <= videocap_default_w;
               rr_data[15:0]  <= videocap_default_h; end // 'h56
         'h58: begin
-              rr_data[31:16] <= videocap_ymax;
-              rr_data[15:0] <= 16'h0000; end
+              rr_data[31:16] <= 16'h0000; //videocap_ymax;
+              rr_data[15:0]  <= 16'h0000; end
         'h5c: begin
               rr_data[31:16] <= 16'h0000;
               rr_data[15:0]  <= dvi_vsync_reg; end
@@ -1656,7 +1670,7 @@ always @(posedge z_sample_clk) begin
         'hbc: rr_data <= 'h0014_7000; // fail
         'hc0: rr_data <= 'h317c_0001; // enable videocap
         'hc4: rr_data <= 'h004e_317c; // reset SD ctrl
-        'hc8: rr_data <= 'h0001_0060;
+        'hc8: rr_data <= 'h0000_0060; // FIXME
         'hcc: rr_data <= 'h4e71_4e75; // nop, rts
         'hd0: rr_data <= 'h7000_2848; // start, moveq #0,d0
         'hd4: rr_data <= 'hd9fc_0001;
@@ -1743,9 +1757,11 @@ always @(posedge z_sample_clk) begin
         'h0e: colormode <= regdata_in[2:0];
         
         'h10: safe_x1 <= regdata_in[10:0];
-        //'h12: fetch_w <= regdata_in[15:0];
-        'h12: wraprow <= regdata_in[15:0];
-        'h16: wraprow2 <= regdata_in[15:0];
+        //'h12: ram_fetch_delay_max <= regdata_in[4:0];
+        'h18: ram_fetch_delay2_max <= regdata_in[4:0]; // below 0x14 causes missing pixel writes
+        
+        //'h12: refresh_warm_max <= regdata_in[7:0];
+        'h16: refresh_cool_max <= regdata_in[4:0]; // below 0xa causes refresh flicker in 8bit
         
         'h14: safe_x2 <= regdata_in[10:0];
         'h1a: fetch_preroll <= regdata_in[15:0];
@@ -1772,8 +1788,6 @@ always @(posedge z_sample_clk) begin
           
           blitter_ptr  <= blitter_base;
           blitter_ptr2 <= blitter_base2;
-          //blitter_ptr  <= blitter_base + (blitter_y1 * blitter_row_pitch);
-          //blitter_ptr2 <= blitter_base + (blitter_y3 * blitter_row_pitch);
           blitter_rgb32_t <= 0;
         end
         'h2c: blitter_x3 <= regdata_in[11:0];
@@ -1804,15 +1818,13 @@ always @(posedge z_sample_clk) begin
           videocap_mode <= regdata_in[0];
           aligned_row_mode <= regdata_in[0];
         end
-        //'h50: videocap_width <= regdata_in[9:0];
-        //'h52: videocap_height <= regdata_in[9:0];
-        //'h54: videocap_default_w <= regdata_in[9:0];
-        //'h56: videocap_default_h <= regdata_in[9:0];
-        
+        'h50: videocap_width <= regdata_in[9:0];
+        'h52: videocap_height <= regdata_in[9:0];
+        'h54: videocap_default_w <= regdata_in[9:0];
+        'h56: videocap_default_h <= regdata_in[9:0];
         
         'h58: row_pitch <= regdata_in;
         'h5c: row_pitch_shift <= regdata_in[4:0];
-        
         
         // sd card regs
         'h60: sd_reset <= regdata_in[8];
@@ -1851,16 +1863,15 @@ always @(posedge z_sample_clk) begin
   else
     videocap_y3 <= 0;
   
-  x_safe_area_sync <= {x_safe_area_sync[0], x_safe_area};
+  x_safe_area_sync <= x_safe_area;
 
-  if (videocap_mode /*&& blitter_enable==0*/) begin
+  if (videocap_mode) begin
     if (videocap_y3<videocap_height 
         && videocap_line_saved_y!=videocap_y3 
         && videocap_line_saved==1) begin
       videocap_line_saved <= 0;
       videocap_line_saved_y <= videocap_y3;
       videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)<<10);
-      //videocap_save_base <= 'h00f80000 + ((videocap_y2-videocap_voffset2)*640);
       videocap_save_x <= 0;
       videocap_save_x2 <= 0;
     end
@@ -1898,12 +1909,11 @@ always @(posedge z_sample_clk) begin
         ram_addr  <= fetch_y+glitchx2_reg;
         ram_write <= 0;
         ram_byte_enable <= 'b11;
-        // move src
       end
     end
     
     RAM_FETCHING_ROW8: begin
-      if ((fetch_x >= (fetch_w+margin_x))              /* 654 */
+      if ((fetch_x >= (fetch_w+margin_x))
           || (aligned_row_mode==1 && fetch_x >= (screen_w+margin_x))) begin
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
@@ -1913,9 +1923,9 @@ always @(posedge z_sample_clk) begin
         ram_addr  <= ram_addr + 1'b1; // burst incremented
         fetch_x <= fetch_x + 1'b1;
         fetch_buffer[fetch_x-margin_x] <= ram_data_out;
-        ram_enable <= 1; // move dst
+        ram_enable <= 1;
       end else
-        ram_enable <= 1; // move dst
+        ram_enable <= 1;
     end
     
     RAM_BURST_OFF: begin
@@ -1925,7 +1935,6 @@ always @(posedge z_sample_clk) begin
         ram_enable <= 1;
         ram_write <= 0;
         ram_byte_enable <= 1'b11;
-        // homebrew ram refresh
         ram_addr <= refresh_addr;
         refresh_addr <= refresh_addr + 512;
         
@@ -1935,19 +1944,30 @@ always @(posedge z_sample_clk) begin
     
     RAM_BURST_OFF2: begin
       ram_enable <= 0;
-      if (data_out_ready) begin
+      if (ram_fetch_delay2_counter<ram_fetch_delay2_max)
+        ram_fetch_delay2_counter <= ram_fetch_delay2_counter + 1;
+      else
         ram_arbiter_state <= RAM_ROW_FETCHED;
-      end
+    end
+    
+    RAM_FETCH_DELAY_PRE: begin
+      ram_enable <= 0;
+      if (ram_fetch_delay_counter<ram_fetch_delay_max)
+        ram_fetch_delay_counter <= ram_fetch_delay_counter + 1;
+      else
+        ram_arbiter_state <= RAM_READY;
     end
     
     RAM_ROW_FETCHED: begin
-      if ((need_row_fetch_y_latched!=fetch_line_y) && x_safe_area_sync[1] && cmd_ready) begin
+      if ((need_row_fetch_y_latched!=fetch_line_y) && x_safe_area_sync && cmd_ready) begin
         row_fetched <= 0;
-        fetch_x <= 0;
         fetch_line_y <= need_row_fetch_y_latched;
-        ram_arbiter_state <= RAM_READY;
-        
-      end else if (x_safe_area_sync[1]) begin
+        fetch_x <= 0;
+        ram_fetch_delay_counter <= 0;
+        ram_fetch_delay2_counter <= 0;
+        ram_arbiter_state <= RAM_FETCH_DELAY_PRE;
+      
+      end else if (x_safe_area_sync) begin
         // do nothing if in safe area
         
       // BLITTER ----------------------------------------------------------------
@@ -1999,6 +2019,7 @@ always @(posedge z_sample_clk) begin
         zorro_ram_write_request <= 0;
       end else if (blitter_enable==0 && zorro_ram_write_request && cmd_ready) begin
         // process write request
+        //ram_enable <= 0; // CHECKME
         ram_arbiter_state <= RAM_WRITING_ZORRO_PRE;
       end else if (blitter_enable==0 && zorro_ram_read_request && cmd_ready) begin
         // process read request
@@ -2011,8 +2032,8 @@ always @(posedge z_sample_clk) begin
         ram_write <= 1;
         ram_byte_enable <= 'b11;
         ram_addr <= videocap_save_base + videocap_save_x2;
-        ram_data_in <= videocap_buf2[videocap_save_x+videocap_prex2];
-        ram_data_in_next <= videocap_buf[videocap_save_x+videocap_prex2];
+        ram_data_in <= videocap_buf2[videocap_save_x];
+        ram_data_in_next <= videocap_buf[videocap_save_x];
         
         if (videocap_save_x<videocap_width) begin
           videocap_save_x  <= videocap_save_x  + 1'b1;
@@ -2020,43 +2041,41 @@ always @(posedge z_sample_clk) begin
         end else begin
           videocap_line_saved <= 1;
         end
-      end else if (!videocap_mode 
-      && zorro_idle // FIXME mysterious
-      && counter_y_sync<wraprow2 //screen_h // FIXME
-      && counter_y_sync>wraprow
-      && cmd_ready) begin
-        if (refresh_counter<refresh_max) begin
+      end else if (refresh_max > 0 && cmd_ready) begin
+        if (refresh_counter < refresh_max) begin
           refresh_counter <= refresh_counter + 1'b1;
         end else begin
           refresh_counter <= 0;
-          ram_enable <= 0;
           ram_arbiter_state <= RAM_REFRESH_PRE;
         end
       end
     end
     
     RAM_REFRESH_PRE: begin
-      if (data_out_queue_empty && cmd_ready) begin
+      if (refresh_warm_counter>=refresh_warm_max) begin
+        refresh_warm_counter <= 0;
         ram_write <= 0;
         ram_enable <= 1;
-        ram_byte_enable <= 'b11;
         ram_addr <= refresh_addr;
         refresh_addr <= refresh_addr + 512;
         ram_arbiter_state <= RAM_REFRESH;
+      end else begin
+        ram_enable <= 0;
+        refresh_warm_counter <= refresh_warm_counter+1'b1;
       end
     end
     
     RAM_REFRESH: begin
-      if (data_out_ready) begin
-        ram_enable <= 0;
-        ram_arbiter_state <= RAM_REFRESH_END;
-      end
+      ram_enable <= 0;
+      ram_arbiter_state <= RAM_REFRESH_END;
     end
     
     RAM_REFRESH_END: begin
-      if (data_out_queue_empty) begin
+      if (refresh_cool_counter>=refresh_cool_max) begin
+        refresh_cool_counter <= 0;
         ram_arbiter_state <= RAM_ROW_FETCHED;
-      end
+      end else
+        refresh_cool_counter <= refresh_cool_counter+1'b1;
     end
     
     RAM_BLIT_WRITE: begin
@@ -2148,7 +2167,6 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_WRITING_ZORRO_PRE: begin
-      if (cmd_ready) begin
       
 `ifdef TRACE
         trace_5 <= zorro_ram_write_addr;
@@ -2161,18 +2179,19 @@ always @(posedge z_sample_clk) begin
         ram_write   <= 1;
         ram_enable  <= 1;
         
+      if (cmd_ready) begin
         ram_arbiter_state <= RAM_WRITING_ZORRO;
       end
     end
     
     RAM_WRITING_ZORRO: begin
-      //if (cmd_ready) begin
-        zorro_ram_write_done <= 1;
-        zorro_ram_write_request <= 0;
-        ram_enable <= 0;
-        ram_write <= 0;
+      zorro_ram_write_done <= 1;
+      zorro_ram_write_request <= 0;
+      ram_enable <= 0;
+      ram_write <= 0;
+      if (cmd_ready) begin
         ram_arbiter_state <= RAM_ROW_FETCHED;
-      //end
+      end
     end
     
     default:
@@ -2191,7 +2210,7 @@ reg[11:0] counter_8x = 0;
 reg display_sprite = 0;
 reg preheat = 0;
 reg x_safe_area = 0;
-reg [1:0] x_safe_area_sync = 0;
+reg x_safe_area_sync = 0;
 reg display_pixels = 0;
 
 reg vga_scalemode_h = 0;
@@ -2243,7 +2262,7 @@ reg [2:0] counter_repeat_delayed = 0;
 reg [1:0] counter_scanout_words = 1;
 reg [1:0] max_repeat = 0;
 reg counter_vscale = 0;
-reg aligned_row_mode = 1;
+reg aligned_row_mode = 0; // CHECKME
 
 always @(posedge vga_clk) begin
   x_safe_area <= ((counter_scanout > safe_x2) || (counter_scanout < safe_x1));
@@ -2360,15 +2379,6 @@ always @(posedge vga_clk) begin
     blue_p  <= 0;
   end else if (vga_colormode==0) begin
     // 8 bit palette indexed
-    // 0: +0a +0b +1a
-    // 1: +0b +1a +1b
-    
-    /*if (preheat) begin
-      red_p <= 0;
-      green_p <= 0;
-      blue_p <= 0;
-      preheat <= 0;
-    end else*/ 
     if (counter_repeat_delayed[vga_scalemode_h]==1) begin
       red_p   <= palette_r[rgb[7:0]];
       green_p <= palette_g[rgb[7:0]];

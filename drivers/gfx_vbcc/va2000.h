@@ -54,7 +54,7 @@ typedef volatile struct MNTVARegs {
   u16 reserved_12; // 12
   u16 safe_x2; // 14
   u16 reserved_16; // 16
-  u16 reserved_18; // 18
+  u16 ram_fetch_delay2_max; // 18
   u16 fetch_preroll; // 1a
 
   u16 blitter_row_pitch; // 1c
@@ -85,8 +85,8 @@ typedef volatile struct MNTVARegs {
   u16 blitter_dst_lo; // 46
   
   u16 reserved_48;
-  u16 reserved_4a;
-  u16 reserved_4c;
+  u16 dcm7_psincdec; // 4a
+  u16 dcm7_rst; // 4c
   u16 capture_mode; // 4e
 
   u16 capture_w; // 50

@@ -25,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/* REVISION 1.7.2 */
+/* REVISION 1.8.3 */
 
 #include "mntgfx.h"
 #include "va2000.h"
@@ -45,7 +45,7 @@ static ULONG LibStart(void) {
 }
 
 static const char LibraryName[] = "mntgfx.card";
-static const char LibraryID[]   = "$VER: mntgfx.card 1.72 (29.9.2017)\r\n";
+static const char LibraryID[]   = "$VER: mntgfx.card 1.83 (2017-10-25)\r\n";
 
 struct MNTGFXBase* OpenLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
 BPTR __saveds CloseLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
@@ -86,7 +86,7 @@ static const struct Resident ROMTag = {
   &ROMTag,
   &ROMTag + 1,
   RTF_AUTOINIT,
-	72,
+	83,
   NT_LIBRARY,
   0,
   (char *)LibraryName,
@@ -334,7 +334,8 @@ void vsync_wait(__reg("a0") struct RTGBoard* b) {
 }
 int is_vsynced(__reg("a0") struct RTGBoard* b,__reg("d0")  uint8 p) {
   MNTVARegs* registers = b->registers;
-  return registers->vsync;
+  if (registers->vsync) return -1;
+  return 0;
 }
 void set_clock(__reg("a0") struct RTGBoard* b) {
 }
@@ -474,6 +475,10 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
     registers->safe_x1 = 0x10;
     registers->safe_x2 = 0x300;
     registers->fetch_preroll = 0x320;
+  } else if (colormode == MNTVA_COLOR_32BIT && m->width==1280) {
+    registers->safe_x1 = 0x10;
+    registers->safe_x2 = 0x340;
+    registers->fetch_preroll = 0x360;
   } else if (colormode == MNTVA_COLOR_32BIT && m->width>800) {
     registers->safe_x1 = 0x10;
     registers->safe_x2 = 0x376;
@@ -486,6 +491,12 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
     registers->fetch_preroll = 0x3e0;
   }
 
+  if (colormode == MNTVA_COLOR_32BIT) {
+    registers->ram_fetch_delay2_max = 0xa;
+  } else {
+    registers->ram_fetch_delay2_max = 0x17;
+  }
+  
   if (m->height>360 || m->width>640) {
     scale = 0;
     w = m->width;
@@ -502,18 +513,9 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   init_modeline(registers, w, h);
   init_mode_pitch(registers, w, colormode);
 
-  /*if (colormode==MNTVA_COLOR_8BIT) {
-    registers->margin_x = 8; // CHECK
-  } else if (colormode==MNTVA_COLOR_32BIT) {
-    registers->margin_x = 4;
-  } else {
-    registers->margin_x = 8;
-  }*/
-
   registers->margin_x = 8;
   registers->colormode = colormode;
 
-  //registers->preheat_x = 1;
   registers->scalemode = (scale<<2) | scale; // vscale|hscale
   registers->screen_w = w;
   registers->screen_h = h;
@@ -524,6 +526,9 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   } else if (colormode==MNTVA_COLOR_8BIT) {
     registers->line_w = w>>1; // fetch half the data per line
   }
+
+  // reset clock again to clean up any glitches
+  init_modeline(registers, w, h);
 }
 
 uint32 is_bitmap_compatible(__reg("a0") struct RTGBoard* b,__reg("d7")  uint16 format) {
@@ -553,8 +558,8 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
   
   if (state==0 && CX_ENABLED) {
     // capture amiga video to 16bit
-    registers->pan_ptr_hi = 0xf8; // capture to the end of video memory
-    registers->pan_ptr_lo = 0; // 0x9c00; // 9c00 = 39 rows of vertical offset
+    registers->pan_ptr_hi = 0xf8; // capture at the end of video memory
+    registers->pan_ptr_lo = 0;
 
     registers->safe_x1 = 0;
     registers->safe_x2 = 0x220;
@@ -569,17 +574,13 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     registers->colormode = MNTVA_COLOR_16BIT565;
     registers->scalemode = 0; //4; // scalemode x1:1, y2:1
     
-    //registers->line_w = 0x280;
-    
-    //registers->capture_mode = 0;
-    //b->scratch[SCR_CAPMODE] = 0;
+    registers->ram_fetch_delay2_max = 0;
 
     registers->capture_mode = 1;
     b->scratch[SCR_CAPMODE] = 1;
   } else {
     // rtg mode
     registers->capture_mode = 0;
-    //registers->safe_x = 0x50;
     
     b->scratch[SCR_CAPMODE] = 0;
     init_mode(b, b->mode_info, b->border);
@@ -615,7 +616,6 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   }
 
   registers->blitter_row_pitch = pitch>>1;
-  //registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
     color8=color;
@@ -690,7 +690,6 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   }
 
   registers->blitter_row_pitch = pitch>>1;
-  //registers->blitter_row_pitch_shift = pitch_to_shift(pitch>>1);
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
     // fallback as long as 8-bit blitter is unstable

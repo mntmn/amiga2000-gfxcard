@@ -350,6 +350,7 @@ always @(posedge clk)
               burst_old <= 0;
            end else if (got_transaction == 1'b1) begin
               state       <= s_open_in_2;
+              
               iob_command <= CMD_ACTIVE;
               iob_address <= save_row;
               iob_bank    <= save_bank;

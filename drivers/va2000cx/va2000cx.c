@@ -2,6 +2,7 @@
 
 #include <libraries/expansion.h>
 #include <libraries/configvars.h>
+#include "../gfx_vbcc/va2000.h"
 
 #define uint8_t unsigned char
 #define uint16_t unsigned short
@@ -11,9 +12,8 @@ struct Library* ExpansionBase;
 
 int main(int argc, char** argv) {
   struct ConfigDev* cd = NULL;
-  uint8_t* regs;
   uint8_t* memory;
-  volatile uint16_t* reg;
+  MNTVARegs* regs;
   int shift;
   int i;
   int op = 0xffff;
@@ -28,10 +28,10 @@ int main(int argc, char** argv) {
   
   if (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x1)) {
     memory = (uint8_t*)(cd->cd_BoardAddr)+0x10000;
-    regs = (uint8_t*)(cd->cd_BoardAddr);
+    regs = (MNTVARegs*)(cd->cd_BoardAddr);
     fw = *((uint16_t*)regs);
-    if (fw<5) {
-      printf("This tool needs at least VA2000 Firmware 1.5 to operate. Found: %d\n", fw);
+    if (fw<83) {
+      printf("This tool needs at least VA2000 Firmware 1.8.3 to operate. Found: %d\n", fw);
       return 1;
     }
   } else {
@@ -43,32 +43,27 @@ int main(int argc, char** argv) {
     uint16_t width, height;
     width = atoi(argv[2]);
     height = atoi(argv[3]);
-    *((volatile uint16_t*)(regs+0x54)) = width;
-    *((volatile uint16_t*)(regs+0x56)) = height;
+    regs->capture_default_screen_w = width;
+    regs->capture_default_screen_h = height;
     if (argc==5 && !strcmp(argv[4],"apply")) {
-      *((volatile uint16_t*)(regs+0x06)) = width;
-      *((volatile uint16_t*)(regs+0x08)) = height;
+      regs->screen_w = width;
+      regs->screen_h = height;
     }
-  } else if (argc==3 || argc==4 && !strcmp(argv[1],"voffset")) {
+  } else if ((argc==3 || argc==4) && !strcmp(argv[1],"voffset")) {
     uint16_t voffset = atoi(argv[2]);
-    reg = (volatile uint16_t*)(regs+0x3e);
-    *reg = voffset;
-    if (argc==4 && !strcmp(argv[3],"apply")) {
-      reg = (volatile uint16_t*)(regs+0x3a); // pan:lo
-      *reg = 1024*voffset;
-    }
+    regs->videocap_voffset = voffset;
+    //if (argc==4 && !strcmp(argv[3],"apply")) {
+    //  regs->pan_ptr_lo = 1024*voffset;
+    //}
   } else if (argc==3 && !strcmp(argv[1],"hoffset")) {
     uint16_t hoffset = atoi(argv[2]);
-    reg = (volatile uint16_t*)(regs+0x3c);
-    *reg = hoffset;
+    regs->videocap_prex = hoffset;
   } else if (argc==3 && !strcmp(argv[1],"vsize")) {
     uint16_t vsize = atoi(argv[2]);
-    reg = (volatile uint16_t*)(regs+0x52);
-    *reg = vsize;
+    regs->capture_h = vsize;
   } else if (argc==3 && !strcmp(argv[1],"hsize")) {
     uint16_t hsize = atoi(argv[2]);
-    reg = (volatile uint16_t*)(regs+0x50);
-    *reg = hsize;
+    regs->capture_w = hsize;
   } else if (argc==2) {
     shift = atoi(argv[1]);
 
@@ -76,17 +71,16 @@ int main(int argc, char** argv) {
       shift=-shift;
       op=0;
     }
-  
-    reg = (volatile uint16_t*)(regs+0x4c); // reset
-    *reg = 1;
+
+    // reset capture clock shift
+    regs->dcm7_rst = 1;
 
     for (i=0; i<shift; i++) {
-      reg = (volatile uint16_t*)(regs+0x4a);
-      *reg = op;
+      regs->dcm7_psincdec = op;
       usleep(1000*50);
     }
   } else {
-    printf("MNT VA2000CX Adjustment Tool\n");
+    printf("MNT VA2000CX Adjustment Tool 1.8.3\n");
     printf("Usage:\n\nPhase Shift (value between -255 and 255):\nva2000cx 220\n\n");
     printf("Target Screenmode (default 640 480):\nva2000cx mode 640 512\nva2000cx mode 640 512 apply (set mode immediately)\n\n");
     printf("Horizontal Offset (default 64):\nva2000cx hoffset 40\n\n");
