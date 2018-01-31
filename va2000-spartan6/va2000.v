@@ -2,11 +2,11 @@
 // Company: MNT Media and Technology UG
 // Engineer: Lukas F. Hartmann (@mntmn)
 // Create Date:    21:49:19 03/22/2016 
-// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.8.3
-// Module Name:    z2
+// Design Name:    Amiga 2000/3000/4000 Graphics Card (VA2000) Revision 1.8.4
+// Module Name:    va2000
 // Target Devices: 
 
-module z2(
+module va2000(
 input CLK50,
 
 // zorro
@@ -230,7 +230,6 @@ reg [15:0] fetch_preroll = 1;//'h3ff;
 //parameter fetch_preroll = 64;
 
 reg [15:0] row_pitch = 1024;
-reg [3:0] row_pitch_shift = 10; // 1024 = 1<<10
 
 reg [15:0] blitter_row_pitch = 2048;
 
@@ -460,7 +459,7 @@ reg [2:0] blitter_colormode = 1;
 reg [1:0] scalemode_h = 0;
 reg [1:0] scalemode_v = 0;
 
-reg [15:0] REVISION = 83; // 1.8.3
+reg [15:0] REVISION = 84; // 1.8.4
 
 // memory map
 parameter reg_size = 32'h01000;
@@ -984,7 +983,6 @@ always @(posedge z_sample_clk) begin
       v_max        <= 631;
       
       row_pitch    <= 1024;
-      row_pitch_shift <= 10;
       
       safe_x1 <= 0;
       safe_x2 <= 'h220;
@@ -1824,7 +1822,6 @@ always @(posedge z_sample_clk) begin
         'h56: videocap_default_h <= regdata_in[9:0];
         
         'h58: row_pitch <= regdata_in;
-        'h5c: row_pitch_shift <= regdata_in[4:0];
         
         // sd card regs
         'h60: sd_reset <= regdata_in[8];
@@ -2227,6 +2224,7 @@ reg[11:0] vga_v_sync_end = 0;
 reg[11:0] vga_h_rez = 0;
 reg[11:0] vga_v_rez = 0;
 reg[11:0] vga_screen_h = 0;
+reg[11:0] vga_screen_w = 0;
 reg vga_reset = 0;
 
 always @(posedge vga_clk) begin
@@ -2246,6 +2244,7 @@ always @(posedge vga_clk) begin
     vga_screen_h <= screen_h;
     vga_scalemode_v <= scalemode_v;
   end
+  vga_screen_w <= screen_w;
   vga_h_rez <= h_rez;
   vga_v_rez <= v_rez;
   vga_h_sync_start <= h_sync_start;
@@ -2263,6 +2262,7 @@ reg [1:0] counter_scanout_words = 1;
 reg [1:0] max_repeat = 0;
 reg counter_vscale = 0;
 reg aligned_row_mode = 0; // CHECKME
+reg black_border = 0;
 
 always @(posedge vga_clk) begin
   x_safe_area <= ((counter_scanout > safe_x2) || (counter_scanout < safe_x1));
@@ -2373,7 +2373,12 @@ always @(posedge vga_clk) begin
       rgb <= sb0;
   end
   
-  if (!display_pixels) begin
+  if (counter_x>=vga_screen_w)
+    black_border <= 1;
+  else
+    black_border <= 0;
+  
+  if (!display_pixels || black_border) begin
     red_p   <= 0;
     green_p <= 0;
     blue_p  <= 0;
