@@ -1922,6 +1922,7 @@ always @(posedge z_sample_clk) begin
         ram_addr  <= fetch_y+glitchx2_reg;
         ram_write <= 0;
         ram_byte_enable <= 'b11;
+        ram_enable <= 1;
       end
     end
     
@@ -1931,14 +1932,13 @@ always @(posedge z_sample_clk) begin
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
-        
-      end else if (data_out_ready) begin
+      end
+      
+      if (data_out_ready) begin
         ram_addr  <= ram_addr + 1'b1; // burst incremented
         fetch_x <= fetch_x + 1'b1;
         fetch_buffer[fetch_x] <= ram_data_out;
-        ram_enable <= 1;
-      end else
-        ram_enable <= 1;
+      end
     end
     
     RAM_BURST_OFF: begin
@@ -2122,7 +2122,7 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_BLIT_COPY_READ: begin
-      ram_enable <= 0; // FIXME initial back-to-back read of sdram controller sends data_out_ready too early? row timing?
+      //ram_enable <= 0; // FIXME initial back-to-back read of sdram controller sends data_out_ready too early? row timing?
       
       if (data_out_ready) begin  
         if (blitter_copy_counter<BLITTER_COPY_SIZE)
