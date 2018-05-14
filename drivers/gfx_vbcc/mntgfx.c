@@ -25,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/* REVISION 1.8.3 */
+/* REVISION 1.8.5 */
 
 #include "mntgfx.h"
 #include "va2000.h"
@@ -39,13 +39,14 @@
 #include <exec/execbase.h>
 #include <exec/resident.h>
 #include <exec/initializers.h>
+#include <clib/debug_protos.h>
 
 static ULONG LibStart(void) {
   return(-1);
 }
 
 static const char LibraryName[] = "mntgfx.card";
-static const char LibraryID[]   = "$VER: mntgfx.card 1.83 (2017-10-25)\r\n";
+static const char LibraryID[]   = "$VER: mntgfx.card 1.85 (2018-05-13)\r\n";
 
 struct MNTGFXBase* OpenLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
 BPTR __saveds CloseLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
@@ -306,17 +307,30 @@ uint32 enable_display(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 enabled
 void memory_alloc(__reg("a0") struct RTGBoard* b,__reg("d0")  uint32 len,__reg("d1")  uint16 s1,__reg("d2")  uint16 s2) {
 }
 
+// useful for debugging
+void waitclick() {
+#define CIAAPRA ((volatile uint8*)0xbfe001)
+  // bfe001 http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node012E.html
+  while ((*CIAAPRA & (1<<6))) {
+    // wait for left mouse button pressed
+  }
+  while (!(*CIAAPRA & (1<<6))) {
+    // wait for left mouse button released
+  }
+}
+
 void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint16 w,__reg("d1")  int16 x,__reg("d2")  int16 y,__reg("d7")  uint16 format) {
   MNTVARegs* registers = b->registers;
 
   uint32 offset = (mem-(b->memory))>>1; // offset divided by 2 = number of words
-  uint16 offhi = (offset&0xffff0000)>>16;
-  uint16 offlo = offset&0xfc00;
+  uint32 offhi = (offset&0xffff0000)>>16;
+  uint32 offlo = offset&0xfc00;
+ 
+  registers->capture_mode = 0; // CHECKME
+  b->scratch[SCR_CAPMODE] = 0;
 
   registers->pan_ptr_hi = offhi;
   registers->pan_ptr_lo = offlo;
-  registers->capture_mode = 0; // CHECKME
-  b->scratch[SCR_CAPMODE] = 0;
 }
 
 void set_memory_mode(__reg("a0") struct RTGBoard* b,__reg("d7")  uint16 format) {
@@ -357,22 +371,26 @@ void set_palette(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 idx,__reg("d
 }
 
 uint16 calc_pitch_bytes(uint16 w, uint16 colormode) {
-  //uint16 pitch = 2048;
-  //if (w<=1024) pitch = 1024;
   uint16 pitch = w;
-  
-  pitch = pitch<<colormode;
+
+  if (colormode == MNTVA_COLOR_1BIT) {
+    // monochrome, 16 pixels per word
+    pitch = w>>3;
+  } else {
+    pitch = pitch<<colormode;
+  }
   return pitch;
 }
 
 uint16 rtg_to_mnt_colormode(uint16 format) {
   if (format==RTG_COLOR_FORMAT_CLUT) {
-    return 0;
+    return MNTVA_COLOR_8BIT;
+  } else if (format==9) {
+    return MNTVA_COLOR_32BIT;
+  } else if (format==0) {
+    return MNTVA_COLOR_1BIT;
   }
-  else if (format==9) {
-    return 2;
-  }
-  return 1;
+  return MNTVA_COLOR_16BIT565;
 }
 
 uint16 pitch_to_shift(uint16 p) {
@@ -486,6 +504,9 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   } else if (colormode != MNTVA_COLOR_32BIT && m->width==800) {
     registers->safe_x2 = 0x3e0;
     registers->fetch_preroll = 0x3f0;
+  } else if (colormode == MNTVA_COLOR_1BIT) {
+    registers->safe_x2 = 0x3e0;
+    registers->fetch_preroll = 0x3f5;
   } else {
     registers->safe_x2 = 0x3d0;
     registers->fetch_preroll = 0x3e0;
