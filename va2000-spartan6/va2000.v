@@ -437,6 +437,12 @@ reg [15:0] last_read_data = 0;
 reg [7:0] palette_r [0:255];
 reg [7:0] palette_g [0:255];
 reg [7:0] palette_b [0:255];
+reg [7:0] pal0r;
+reg [7:0] pal0g;
+reg [7:0] pal0b;
+reg [7:0] pal1r;
+reg [7:0] pal1g;
+reg [7:0] pal1b;
 
 // sprites, currently disabled
 /*reg [15:0] sprite_a1 [0:127];
@@ -497,7 +503,7 @@ reg [15:0] blitter_y3 = 0; // 2e
 reg [15:0] blitter_x4 = 0; // 30
 reg [15:0] blitter_y4 = 0; // 32
 
-parameter BLITTER_COPY_SIZE = 64;
+parameter BLITTER_COPY_SIZE = 32;
 
 reg [15:0] blitter_rgb = 'h0008; // 28
 reg [15:0] blitter_copy_rgb [0:BLITTER_COPY_SIZE-1];
@@ -517,8 +523,6 @@ reg [7:0]  blitter_copy_counter = 0;
 reg [7:0] blitter_copy_stopx = 0;
 reg [15:0] blitter_copy_startx = 0;
 reg [15:0] blitter_copy_startx2 = 0;
-
-reg write_stall = 0;
 
 // main FSM
 parameter RESET = 0;
@@ -897,6 +901,7 @@ parameter RAM_WRITE_END1 = 17;
 parameter RAM_WRITE_END = 18;
 parameter RAM_REFRESH_END = 19;
 parameter RAM_FETCH_DELAY_PRE = 20;
+parameter RAM_BLIT_COPY_READ2 = 21;
 
 reg [11:0] need_row_fetch_y = 0;
 reg [11:0] need_row_fetch_y_latched = 0;
@@ -1317,14 +1322,12 @@ always @(posedge z_sample_clk) begin
           dataout <= 0;
           dataout_enable <= 0;
           slaven <= 0;
-          write_stall <= 0;
         end
           
       end else begin
         dataout <= 0;
         dataout_enable <= 0;
         slaven <= 0;
-        write_stall <= 0;
       end
     end
     
@@ -1740,10 +1743,16 @@ always @(posedge z_sample_clk) begin
       
       if (regwrite_addr>='h600) begin
         palette_r[regwrite_addr[8:1]] <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==0) pal0r <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==1) pal1r <= regdata_in[7:0];
       end else if (regwrite_addr>='h400) begin
         palette_g[regwrite_addr[8:1]] <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==0) pal0g <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==1) pal1g <= regdata_in[7:0];
       end else if (regwrite_addr>='h200) begin
         palette_b[regwrite_addr[8:1]] <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==0) pal0b <= regdata_in[7:0];
+        if (regwrite_addr[8:1]==1) pal1b <= regdata_in[7:0];
       end else
       case (regwrite_addr)
         'h02: screen_w <= regdata_in[11:0];
@@ -1927,8 +1936,8 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_FETCHING_ROW8: begin
-      if ((fetch_x == (fetch_w))
-          || (aligned_row_mode==1 && fetch_x == (screen_w_sync))) begin
+      if ((fetch_x == fetch_w)
+          || (aligned_row_mode==1 && fetch_x == screen_w_sync)) begin
         row_fetched <= 1; // row completely fetched
         ram_enable <= 0;
         ram_arbiter_state <= RAM_READY;
@@ -2015,6 +2024,7 @@ always @(posedge z_sample_clk) begin
         end
         
       end else if (blitter_enable==4 && cmd_ready) begin
+        ram_enable <= 0;
         ram_arbiter_state <= RAM_BLIT_COPY_WRITE;
         
       // ZORRO READ/WRITE ----------------------------------------------
@@ -2122,9 +2132,9 @@ always @(posedge z_sample_clk) begin
     end
     
     RAM_BLIT_COPY_READ: begin
-      //ram_enable <= 0; // FIXME initial back-to-back read of sdram controller sends data_out_ready too early? row timing?
+      ram_enable <= 0; // FIXME initial back-to-back read of sdram controller sends data_out_ready too early? row timing?
       
-      if (data_out_ready) begin  
+      if (data_out_ready) begin
         if (blitter_copy_counter<BLITTER_COPY_SIZE)
           blitter_copy_rgb[blitter_copy_counter] <= ram_data_out;
         
@@ -2138,7 +2148,7 @@ always @(posedge z_sample_clk) begin
           end else
             // hot loop while we can
             ram_arbiter_state <= RAM_BLIT_COPY_READ1;
-          
+        
           if (blitter_dirx==1) begin
             // previous column
             blitter_curx2 <= blitter_curx2 - 1'b1;
@@ -2325,10 +2335,10 @@ end
 
 reg [9:0] counter_scanout = 0;
 reg [9:0] counter_px = 0;
-reg [2:0] counter_repeat = 0;
-reg [2:0] counter_repeat_delayed = 0;
+reg [3:0] counter_repeat = 0;
+reg [3:0] counter_repeat_delayed = 0;
 reg [1:0] counter_scanout_words = 1;
-reg [1:0] max_repeat = 0;
+reg [3:0] max_repeat = 0;
 reg counter_vscale = 0;
 reg aligned_row_mode = 0; // CHECKME
 reg black_border = 0;
@@ -2377,6 +2387,8 @@ always @(posedge vga_clk) begin
       max_repeat <= 3;
     else
       max_repeat <= 1;
+  else if (vga_colormode==3)
+    max_repeat <= 15;
   else
     if (vga_scalemode_h==1)
       max_repeat <= 1;
@@ -2473,6 +2485,12 @@ always @(posedge vga_clk) begin
     blue_p   <= rgb2[15:8];
     green_p <= rgb[7:0];
     red_p  <= rgb[15:8];
+    
+  end else if (vga_colormode==3) begin
+    // monochrome 1-bit
+    blue_p  <= rgb[~counter_repeat_delayed]?pal1r:pal0r;
+    green_p <= rgb[~counter_repeat_delayed]?pal1g:pal0g;
+    red_p   <= rgb[~counter_repeat_delayed]?pal1b:pal0b;
   end else begin
     red_p   <= 0;
     green_p <= 0;
