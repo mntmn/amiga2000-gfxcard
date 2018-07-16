@@ -25,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/* REVISION 1.8.5 */
+/* REVISION 1.9.0 */
 
 #include "mntgfx.h"
 #include "va2000.h"
@@ -46,7 +46,7 @@ static ULONG LibStart(void) {
 }
 
 static const char LibraryName[] = "mntgfx.card";
-static const char LibraryID[]   = "$VER: mntgfx.card 1.85 (2018-05-13)\r\n";
+static const char LibraryID[]   = "$VER: mntgfx.card 1.90 (2018-07-16)\r\n";
 
 struct MNTGFXBase* OpenLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
 BPTR __saveds CloseLib( __reg("a6") struct MNTGFXBase *MNTGFXBase);
@@ -534,7 +534,6 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   init_modeline(registers, w, h);
   init_mode_pitch(registers, w, colormode);
 
-  registers->margin_x = 8;
   registers->colormode = colormode;
 
   registers->scalemode = (scale<<2) | scale; // vscale|hscale
@@ -585,7 +584,7 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     registers->safe_x1 = 0;
     registers->safe_x2 = 0x220;
     registers->fetch_preroll = 1;
-    registers->margin_x = 10;
+    //registers->margin_x = 10;
 
     init_modeline(registers, registers->capture_default_screen_w, registers->capture_default_screen_h);
     init_mode_pitch(registers, registers->capture_default_screen_w, MNTVA_COLOR_16BIT565);
@@ -731,7 +730,7 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
       w--;
     } else if (x&1 || dx&1) {
       // perform the whole blit manually because we
-      // can't to byte swapping yet
+      // can't do byte swapping yet
       b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
       return;
     }*/
