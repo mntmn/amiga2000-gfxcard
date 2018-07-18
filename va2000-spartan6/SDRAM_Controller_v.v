@@ -31,7 +31,7 @@
 // For reads or wries to the same it is can be as high as 184MB/s 
 ////////////////////////////////////////////////////////////////////////////////////
 module SDRAM_Controller_v (
-                           clk,   reset,
+                           clk,   reset, idle,
                            // command and write port
                            cmd_ready, cmd_enable, cmd_wr, cmd_byte_enable, cmd_address, cmd_data_in, cmd_data_in_next,
                            // Read data port
@@ -49,6 +49,7 @@ module SDRAM_Controller_v (
   input  clk;
   input  reset;
   output cmd_ready;
+  output idle;
   input  cmd_enable;
   input  cmd_wr;
   input  [sdram_address_width-1:0] cmd_address;
@@ -113,7 +114,7 @@ module SDRAM_Controller_v (
   wire [12:0] MODE_REG;     // Reserved,    WBL,   TEST,   CAS Latency (2), BT,    Burst Length (3)
   assign      MODE_REG =        {3'b000,    1'b0,  2'b00,  3'b010,          1'b0,  burst_size};
   
-  //reg  [15:0] captured_data;
+  reg  [15:0] captured_data;
   wire [15:0] sdram_din;
 
   ///////////////////////////////
@@ -132,6 +133,8 @@ module SDRAM_Controller_v (
   parameter s_open_in_7 = 5'b10111;
   parameter s_open_in_8 = 5'b11000;
   reg [4:0] state = s_startup;
+
+  assign idle = (state == s_idle);
   
   // dual purpose counter, it counts up during the startup phase, then is used to trigger refreshes.
   parameter startup_refresh_max   = 14'b11111111111111;
@@ -163,7 +166,7 @@ module SDRAM_Controller_v (
   reg iob_dq_hiz = 1'b0;
   
   // shift register for when to read the data off of the bus
-  parameter data_ready_delay_high = 2; // can be a bit faster in simulation, but not in real life
+  parameter data_ready_delay_high = 3; // can be a bit faster in simulation, but not in real life
   reg [data_ready_delay_high:0] data_ready_delay;
   // reg [3:0] data_ready_delay; // (for < 60Mhz)
   
@@ -209,8 +212,11 @@ module SDRAM_Controller_v (
   reg can_back_to_back = 0;
   reg [2:0] burst_old = 0;
 
-  //always @(posedge clk) captured_data <= SDRAM_DATA;
-
+  always @(negedge clk) 
+    begin
+      captured_data <= SDRAM_DATA;
+    end
+      
   always @(posedge clk)
     begin
       startup_refresh_count <= startup_refresh_count+1'b1;
@@ -223,8 +229,6 @@ module SDRAM_Controller_v (
           can_back_to_back <= 1'b1;
         else
           can_back_to_back <= 1'b0;
-        
-        //$display("%h r: %h c: %h",cmd_address,addr_row,addr_col);
         save_row         <= addr_row;
         save_bank        <= addr_bank;
         save_col         <= addr_col;
@@ -245,7 +249,7 @@ module SDRAM_Controller_v (
       //end
 
       if (data_ready_delay[0] == 1'b1) begin
-        data_out_reg       <= SDRAM_DATA; //captured_data;
+        data_out_reg       <= captured_data;
         data_out_ready_reg <= 1'b1;
       end else begin
         data_out_ready_reg <= 1'b0;
@@ -379,35 +383,16 @@ module SDRAM_Controller_v (
         end
         
         s_burst_read: begin
-          if (burst_size==0 /*|| save_col=='h1ff*/) begin
+          if (burst_size==0 || save_col=='h1ff || !cmd_enable) begin
             iob_command <= CMD_TERMINATE;
             state <=  s_precharge;
-            //state <= s_idle;
             ready_for_new   <= 1'b1;
             got_transaction <= 1'b0;
-            //data_ready_delay <= 0;
           end else begin
             //iob_dqm     <= 2'b00;
             ready_for_new <= 1'b1;
             iob_command <= CMD_NOP;
             data_ready_delay[data_ready_delay_high] <= 1'b1;
-            
-            /*if (save_col=='h1fe) begin        // 'b111111010
-              state       <= s_precharge;
-              ready_for_new   <= 1'b1;
-            end else begin
-              if (save_col=='h1fc) begin
-                iob_command <= CMD_TERMINATE;
-                data_ready_delay[0] <= 1'b1;
-              end else begin
-                iob_command <= CMD_NOP;
-                if (save_col=='h1fd)
-                  data_ready_delay[0] <= 1'b0;
-                else
-                  data_ready_delay[0] <= 1'b1;
-              end
-              ready_for_new <= 1'b1;
-            end*/
           end
         end
         s_read_1: begin
@@ -417,7 +402,7 @@ module SDRAM_Controller_v (
           iob_address[prefresh_cmd] <= 1'b0;
           iob_dqm     <= 2'b00;
           
-          if (burst_size>0) begin
+          if (burst_old>1) begin
             ready_for_new <= 1'b1;
             state <= s_burst_read;
             data_ready_delay[data_ready_delay_high]   <= 1'b1;
@@ -427,6 +412,7 @@ module SDRAM_Controller_v (
           end
         end   
         s_read_2: begin
+          //iob_command <= CMD_NOP;
           state <= s_read_3;
           if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
             if (save_wr == 1'b0) begin 
@@ -438,6 +424,7 @@ module SDRAM_Controller_v (
           end
         end
         s_read_3: begin
+          //iob_command <= CMD_NOP;
           state <= s_read_4;
           if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
             if (save_wr == 1'b0) begin
@@ -450,6 +437,7 @@ module SDRAM_Controller_v (
         end
 
         s_read_4: begin
+          //iob_command <= CMD_NOP;
           state <= s_precharge;
           //-- can we do back-to-back read?
           if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
@@ -458,8 +446,8 @@ module SDRAM_Controller_v (
               ready_for_new   <= 1'b1;
               got_transaction <= 1'b0;
             end
-            //else
-            //  state <= s_open_in_2;
+            else
+              state <= s_open_in_2;
           end
         end
         //------------------------------------------------------------------
@@ -478,10 +466,10 @@ module SDRAM_Controller_v (
         end
         s_write_2: begin
           state           <= s_write_3;
-          iob_command     <= CMD_NOP;
           
-          if (burst_size) begin
+          if (burst_old==3'b001) begin
             iob_data        <= iob_data_next;
+            iob_command     <= CMD_NOP;
           end
           
           // can we do a back-to-back write?
@@ -497,29 +485,35 @@ module SDRAM_Controller_v (
           end
         end
         s_write_3: begin
+          //iob_command     <= CMD_NOP;
+
+          if (burst_old==3'b001) begin
+            iob_command     <= CMD_TERMINATE;
+          end
+          
           // must wait tRDL, hence the extra idle state
           //-- back to back transaction?
-          if (got_transaction == 1'b1 && can_back_to_back == 1'b1) begin
-            if (save_wr == 1'b1) begin
+          if (got_transaction == 1'b1 && can_back_to_back == 1'b1 && save_wr==1'b1) begin
+            //if (save_wr == 1'b1) begin
               // back-to-back write?
               state           <= s_write_1;
               ready_for_new   <= 1'b1;
               got_transaction <= 1'b0;
-            end
+            //end
             /*else begin
               // write-to-read switch?
               state           <= s_read_1;
               iob_dq_hiz      <= 1'b1;
               ready_for_new   <= 1'b1;
               got_transaction <= 1'b0;                  
-            end*/ 
+            end*/
           end else begin
-            //iob_dq_hiz         <= 1'b1;
             state              <= s_precharge;
           end
         end
         //-- Closing the row off (this closes all banks)
         s_precharge: begin
+          iob_dq_hiz      <= 1'b1;
           state                     <= s_idle_in_4;
           iob_command               <= CMD_PRECHARGE;
           iob_address[prefresh_cmd] <= 1'b0;

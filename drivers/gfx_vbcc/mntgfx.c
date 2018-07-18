@@ -488,30 +488,18 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
 
   colormode = rtg_to_mnt_colormode(b->color_format);
 
-  registers->safe_x1 = 1;
-  if (colormode == MNTVA_COLOR_32BIT && m->width>1280) {
-    registers->safe_x1 = 0x10;
-    registers->safe_x2 = 0x300;
-    registers->fetch_preroll = 0x320;
-  } else if (colormode == MNTVA_COLOR_32BIT && m->width==1280) {
-    registers->safe_x1 = 0x10;
-    registers->safe_x2 = 0x340;
-    registers->fetch_preroll = 0x360;
-  } else if (colormode == MNTVA_COLOR_32BIT && m->width>800) {
-    registers->safe_x1 = 0x10;
-    registers->safe_x2 = 0x376;
-    registers->fetch_preroll = 0x390;
-  } else if (colormode != MNTVA_COLOR_32BIT && m->width==800) {
+  registers->safe_x2 = 0;
+  
+  if (colormode == MNTVA_COLOR_32BIT && m->width>=1280) {
+    registers->fetch_preroll = 0x180;
+    /*} else if (colormode == MNTVA_COLOR_1BIT) {
     registers->safe_x2 = 0x3e0;
-    registers->fetch_preroll = 0x3f0;
-  } else if (colormode == MNTVA_COLOR_1BIT) {
-    registers->safe_x2 = 0x3e0;
-    registers->fetch_preroll = 0x3f5;
+    registers->fetch_preroll = 0x3f5;*/
   } else {
-    registers->safe_x2 = 0x3d0;
-    registers->fetch_preroll = 0x3e0;
+    registers->fetch_preroll = 0x1e0;
   }
 
+  // FIXME
   if (colormode == MNTVA_COLOR_32BIT) {
     registers->ram_fetch_delay2_max = 0xa;
   } else {
@@ -581,9 +569,9 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     registers->pan_ptr_hi = 0xf8; // capture at the end of video memory
     registers->pan_ptr_lo = 0;
 
-    registers->safe_x1 = 0;
-    registers->safe_x2 = 0x220;
-    registers->fetch_preroll = 1;
+    //registers->safe_x1 = 0;
+    //registers->safe_x2 = 0x220;
+    //registers->fetch_preroll = 1;
     //registers->margin_x = 10;
 
     init_modeline(registers, registers->capture_default_screen_w, registers->capture_default_screen_h);
@@ -674,6 +662,7 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
     w<<=1;
     h--;
     w--;
+    registers->blitter_rgb16 = color>>16;
     registers->blitter_rgb32_hi = color>>16;
     registers->blitter_rgb32_lo = color&0xffff;
     registers->blitter_colormode = MNTVA_COLOR_32BIT;
@@ -693,11 +682,36 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   blitter_wait(b);
 }
 
+void copy_column(uint8* gfxmem,uint32 pitch,uint16 x,uint16 y,uint16 dx,uint16 dy,uint16 h,uint16 col) {
+  uint8* ptr_src, *ptr_dst;
+  uint16 i;
+  if (dy>y) {
+    ptr_dst = gfxmem+(dy+h-1)*pitch+dx+col;
+    ptr_src = gfxmem+( y+h-1)*pitch+ x+col;
+    for (i=0;i<h;i++) {
+      *ptr_dst=*ptr_src;
+      ptr_dst-=pitch;
+      ptr_src-=pitch;
+    }
+  } else {
+    ptr_dst = gfxmem+dy*pitch+dx+col;
+    ptr_src = gfxmem+ y*pitch+ x+col;
+    for (i=0;i<h;i++) {
+      *ptr_dst=*ptr_src;
+      ptr_dst+=pitch;
+      ptr_src+=pitch;
+    }
+  }
+}
+
 void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,__reg("d0")  uint16 x,__reg("d1")  uint16 y,__reg("d2")  uint16 dx,__reg("d3")  uint16 dy,__reg("d4")  uint16 w,__reg("d5")  uint16 h,__reg("d6")  uint8 m,__reg("d7")  uint16 format) {
   MNTVARegs* registers = b->registers;
   uint16 pitch = 1024;
   uint32 color_format = b->color_format;
+  uint8* gfxmem = (uint8*)b->memory;
   uint32 offset = 0, y1, y3;
+
+  blitter_wait(b);
 
   registers->blitter_enable = 0;
 
@@ -707,51 +721,49 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   if (r) {
     pitch = r->pitch;
     color_format = r->color_format;
+    gfxmem = (uint8*)r->memory;
   }
 
   registers->blitter_row_pitch = pitch>>1;
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
-    // fallback as long as 8-bit blitter is unstable
-    b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
-    return;
-    
-    // copy odd rows manually
-    /*if (x&1 && dx&1) {
-      ptr = gfxmem+dy*pitch+dx;
-      ptr_src = gfxmem+y*pitch+x;
-      for (i=0;i<h;i++) {
-        *ptr=*ptr_src;
-        ptr+=pitch;
-        ptr_src+=pitch;
-      }
-      x++;
-      dx++;
-      w--;
-    } else if (x&1 || dx&1) {
-      // perform the whole blit manually because we
-      // can't do byte swapping yet
+    if ((dx&1)!=(x&1)) {
+      // can only scroll 2 byte aligned in x direction
       b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
       return;
-    }*/
-
-    /*if (w&1) {
-      ptr = gfxmem+dy*pitch+dx+w-1;
-      ptr_src = gfxmem+y*pitch+x+w-1;
-      for (i=0;i<h;i++) {
-        *ptr=*ptr_src;
-        ptr+=pitch;
-        ptr_src+=pitch;
-      }
-      w--;
     }
 
-    dx/=2;
-    x/=2;
-    w/=2;
+    // chop off odd columns and copy them manually
+    if (dx>x) {
+      if (x&1 && dx&1) {
+        copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
+        x++;
+        dx++;
+        w--;
+      }
+      if (w&1) {
+        copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
+        w--;
+      }
+    } else {
+      if (w&1) {
+        copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
+        w--;
+      }
+      if (x&1 && dx&1) {
+        copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
+        x++;
+        dx++;
+        w--;
+      }
+    }
+
+    dx>>=1;
+    x>>=1;
+    w>>=1;
     if (w<1) return;
     w--;
-    h--;*/
+    h--;
   } else if (color_format==9) {
     x*=2;
     dx*=2;

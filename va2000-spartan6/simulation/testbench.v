@@ -4,6 +4,8 @@ module testbench;
   reg z_sample_clk = 0;
   reg vgaclk = 0;
   reg e7m = 0;
+  reg dcm7_0 = 0;
+  reg dcm7_180 = 0;
   reg znAS = 1;
   reg znFCS = 1;
   reg znUDS = 1;
@@ -41,6 +43,23 @@ module testbench;
   wire [12:0] SDRAM_A;
   wire [1:0]  SDRAM_BA;
   wire [15:0] SDRAM_D;
+
+  reg videoHS = 0;
+  reg videoVS = 0;
+  reg videoR0 = 0;
+  reg videoG0 = 0;
+  reg videoB0 = 0;
+  reg videoR1 = 0;
+  reg videoG1 = 0;
+  reg videoB1 = 0;
+  reg videoR2 = 0;
+  reg videoG2 = 0;
+  reg videoB2 = 0;
+  reg videoR3 = 0;
+  reg videoG3 = 0;
+  reg videoB3 = 0;
+  reg [15:0] video_in_x = 0;
+  reg [15:0] video_in_y = 0;
   
   mt48lc16m16a2 sdram(.Dq(SDRAM_D), 
                       .Addr(SDRAM_A), 
@@ -69,9 +88,25 @@ module testbench;
            .znCFGIN(znCFGIN),
            .vga_hs(vga_hs),
            .vga_vs(vga_vs),
-           .vga_r(vga_r),
+           .vga_r(vga_b),
            .vga_g(vga_g),
-           .vga_b(vga_b),
+           .vga_b(vga_r),
+           .dcm7_0(dcm7_0),
+           .dcm7_180(dcm7_180),
+           .videoHS(videoHS),
+           .videoVS(videoVS),
+           .videoR0(videoR0),
+           .videoR1(videoR1),
+           .videoR2(videoR2),
+           .videoR3(videoR3),
+           .videoG0(videoG0),
+           .videoG1(videoG1),
+           .videoG2(videoG2),
+           .videoG3(videoG3),
+           .videoB0(videoB0),
+           .videoB1(videoB1),
+           .videoB2(videoB2),
+           .videoB3(videoB3),
 
            .D(SDRAM_D),
            .A(SDRAM_A), 
@@ -139,18 +174,19 @@ module testbench;
       end
 
       // zorro3 read/write test -----------------------
-      /*else if (testbench_state == 6) begin
+      else if (testbench_state == 6) begin
         zREAD = 0;
         zDReg = 'h48ff;
-        zAReg = 'h010000;
-        testbench_state = 6;
+        zAReg = 'h020000;
+        testbench_state = 7;
       end
       else if (testbench_state == 7) begin
-        zREAD = 1;
-        zDReg = 'h4800;
-        zAReg = 'h010004;
-        testbench_state = 8;
-      end*/
+        zREAD = 0;
+        zDReg = 'h48ff;
+        //zAReg = 'h010004;
+        //testbench_state = 6;
+        zAReg = zAReg + 1;
+      end
       
       if (testbench_state < 250) begin
         #12 znFCS = 0;
@@ -181,12 +217,34 @@ module testbench;
   always
     begin
       #74 e7m = !e7m;
+
+      dcm7_0 = !dcm7_0;
+      dcm7_180 = !dcm7_180;
+
+      if (dcm7_0) begin
+          if (video_in_x<340)
+            video_in_x = video_in_x + 1'b1;
+          else begin
+            video_in_x = 0;
+            if (video_in_y<280)
+              video_in_y = video_in_y + 1'b1;
+            else
+              video_in_y = 0;
+          end
+
+        videoHS = (video_in_x>=320);
+        videoVS = (video_in_y>=256);
+
+        {videoR3,videoR2,videoR1,videoR0} = video_in_x;
+        {videoG3,videoG2,videoG1,videoG0} = video_in_y;
+      end
+      
       //if (!zDOE && zREAD) begin
       //  $display("68k read: %h\t%h", zAReg, zD);
       //end
-      if (!zDOE && !zREAD) begin
-        $display("68k write: %h\t%h", zAReg, zDReg);
-      end
+      //if (!zDOE && !zREAD) begin
+      //  $display("68k write: %h\t%h", zAReg, zDReg);
+      //end
     end
   
 endmodule
