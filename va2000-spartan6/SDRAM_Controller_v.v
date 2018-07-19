@@ -287,7 +287,7 @@ module SDRAM_Controller_v (
           iob_cke <= 1'b1;
           
           // All the commands during the startup are NOPS, except these
-          if (startup_refresh_count == startup_refresh_max-31) begin
+          /*if (startup_refresh_count == startup_refresh_max-31) begin
             // ensure all rows are closed
             iob_command     <= CMD_PRECHARGE;
             iob_address[prefresh_cmd] <= 1'b1;  // all banks
@@ -304,12 +304,12 @@ module SDRAM_Controller_v (
             iob_command     <= CMD_LOAD_MODE_REG;
             iob_address     <= MODE_REG;
           end
-          else if (startup_refresh_count == 1'b0) begin
+          else if (startup_refresh_count == 1'b0) begin*/
             state           <= s_idle;
             ready_for_new   <= 1'b1;
             got_transaction <= 1'b0;
             startup_refresh_count <= 2048 - cycles_per_refresh+1;
-          end
+          //end
         end
         s_idle_in_6: begin
           iob_command     <= CMD_NOP;
