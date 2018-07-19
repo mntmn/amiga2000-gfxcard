@@ -607,8 +607,8 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   uint32 color_format = b->color_format;
   uint32 offset = 0;
   
-  registers->blitter_enable = 0;
-
+  blitter_wait(b);
+  
   // no blitting in capture mode
   if (b->scratch[SCR_CAPMODE]==1) return;
   
@@ -710,10 +710,11 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   uint32 color_format = b->color_format;
   uint8* gfxmem = (uint8*)b->memory;
   uint32 offset = 0, y1, y3;
+  uint32 i;
+  uint8 copy_col_later = 0, reverse = 0;
+  uint16 cc_dx, cc_x, cc_dy, cc_y, cc_w, cc_h, cc_col;
 
   blitter_wait(b);
-
-  registers->blitter_enable = 0;
 
   // no blitting in capture mode
   if (b->scratch[SCR_CAPMODE]==1) return;
@@ -725,43 +726,69 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   }
 
   registers->blitter_row_pitch = pitch>>1;
+  if (w<4 || h<2) {
+    b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
+    return;
+  }
 
   if (color_format==RTG_COLOR_FORMAT_CLUT) {
     if ((dx&1)!=(x&1)) {
-      // can only scroll 2 byte aligned in x direction
+      // can only scroll odd/odd or even/even in x direction
       b->fn_rect_copy_fallback(b,r,x,y,dx,dy,w,h,m,format);
       return;
     }
 
-    // chop off odd columns and copy them manually
-    if (dx>x) {
-      if (x&1 && dx&1) {
-        copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
-        x++;
-        dx++;
-        w--;
-      }
-      if (w&1) {
-        copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
+    if (dx>=x) {
+      reverse = 1;
+    }
+    
+    cc_x=x; cc_y=y; cc_dx=dx; cc_dy=dy; cc_w=w; cc_h=h;
+    if ((x&1)==0) {
+      if ((x+w-1)&1) {
+        // x even, x2 odd = nothing special
+      } else {
+        // x even, x2 odd
+        if (reverse) {
+          copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
+        } else {
+          copy_col_later=1;
+          cc_col=w-1;
+        }
         w--;
       }
     } else {
-      if (w&1) {
-        copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
-        w--;
-      }
-      if (x&1 && dx&1) {
-        copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
+      if ((x+w-1)&1) {
+        // x odd, x2 odd
+        if (reverse) {
+          copy_col_later=1;
+          cc_col=0;
+        } else {
+          copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
+        }
         x++;
         dx++;
         w--;
+      } else {
+        // x odd, x2 even
+        if (reverse) {
+          copy_column(gfxmem,pitch,x,y,dx,dy,h,w-1);
+          copy_col_later=1;
+          cc_col=0;
+        } else {
+          copy_column(gfxmem,pitch,x,y,dx,dy,h,0);
+          copy_col_later=1;
+          cc_col=w-1;
+        }
+        x++;
+        dx++;
+        w-=2;
       }
     }
 
     dx>>=1;
     x>>=1;
     w>>=1;
-    if (w<1) return;
+    if (w<1) return; // FIXME fallback threshold
     w--;
     h--;
   } else if (color_format==9) {
@@ -816,6 +843,11 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
 
   registers->blitter_enable = 2;
   blitter_wait(b);
+
+  // 8 bit odd column post processing
+  if (copy_col_later) {
+    copy_column(gfxmem,pitch,cc_x,cc_y,cc_dx,cc_dy,cc_h,cc_col);
+  }
 }
 
 /*void rect_p2c(__reg("a0") struct RTGBoard* b,__reg("a1")  struct BitMap* bm,__reg("a2")  struct RenderInfo* r,__reg("d0")  uint16 x,__reg("d1")  uint16 y,__reg("d2")  uint16 dx,__reg("d3")  uint16 dy,__reg("d4")  uint16 w,__reg("d5")  uint16 h,__reg("d6")  uint8 minterm,__reg("d7")  uint8 mask) {

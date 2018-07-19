@@ -182,17 +182,6 @@ reg  [23:0] scale_buffer [0:639];
 reg  [15:0] sb0;
 reg signed [11:0] fetch_x = 0;
 
-/*wire [15:0] fbuf_001 = fetch_buffer[0];
-wire [15:0] fbuf_002 = fetch_buffer[1];
-wire [15:0] fbuf_003 = fetch_buffer[2];
-wire [15:0] fbuf_004 = fetch_buffer[3];
-wire [15:0] fbuf_512 = fetch_buffer[512];
-wire [15:0] fbuf_513 = fetch_buffer[513];
-wire [15:0] fbuf_640 = fetch_buffer[640];
-wire [15:0] fbuf_641 = fetch_buffer[641];
-wire [15:0] fbuf_642 = fetch_buffer[642];
-wire [15:0] fbuf_643 = fetch_buffer[643];*/
-
 reg  [23:0] fetch_y = 0;
 reg  [31:0] pan_ptr = 0;
 reg  [31:0] pan_ptr_sync = 0;
@@ -456,7 +445,7 @@ reg [7:0] datain_time = 'h10;
 reg [7:0] datain_counter = 0;
 
 reg [4:0] margin_x = 0;
-reg [10:0] safe_x1 = 'h1ff;
+reg [10:0] safe_x1 = 'h200;
 reg [10:0] safe_x2 = 'h1e0; //'h220; //'h60;
 
 // blitter registers
@@ -672,7 +661,7 @@ reg [15:0] videocap_rgbin2 = 0;
 reg [9:0]  videocap_default_w = 640;
 reg [9:0]  videocap_default_h = 512; //480;
 reg [9:0]  videocap_voffset = 'h2a;
-reg [9:0] videocap_prex = 'h41;
+reg [9:0] videocap_prex = 'h42;
 reg [9:0] videocap_height = 'h200; //'h117; // 'h127;
 reg [8:0] videocap_width = 320; //318; // FIXME
 
@@ -1027,7 +1016,7 @@ always @(posedge z_sample_clk) begin
       
       row_pitch    <= 1024;
       
-      safe_x1 <= 'h1ff;
+      //safe_x1 <= 'h1ff;
       safe_x2 <= 'h0; // FIXME
       fetch_preroll <= 'h1e0;
       ram_fetch_delay2_max <= 'h0;
@@ -1105,8 +1094,7 @@ always @(posedge z_sample_clk) begin
         sd_reset <= 0;
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end
-      else*/
+      end else*/
       if (z3addr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 1;
@@ -1827,7 +1815,7 @@ always @(posedge z_sample_clk) begin
         'h0c: margin_x <= regdata_in[9:0];
         'h0e: colormode <= regdata_in[2:0];
         
-        'h10: safe_x1 <= regdata_in[10:0];
+        //'h10: safe_x1 <= regdata_in[10:0];
         //'h12: ram_fetch_delay_max <= regdata_in[4:0];
         //'h18: ram_fetch_delay2_max <= regdata_in[4:0]; // below 0x14 causes missing pixel writes
         
@@ -2084,7 +2072,6 @@ always @(posedge z_sample_clk) begin
         
       end else if (!videocap_line_saved && videocap_mode && cmd_ready && blitter_enable==0) begin
         // CAPTURE
-        //ram_burst_size <= 1;
         ram_enable <= 1;
         ram_write <= 1;
         ram_byte_enable <= 'b11;
@@ -2099,14 +2086,14 @@ always @(posedge z_sample_clk) begin
           videocap_line_saved <= 1;
           ram_enable <= 0;
         end
-      end /*else if (refresh_max > 0 && cmd_ready) begin
+      end else if (refresh_max > 0 && cmd_ready) begin
         if (refresh_counter < refresh_max) begin
           refresh_counter <= refresh_counter + 1'b1;
         end else begin
           refresh_counter <= 0;
           ram_arbiter_state <= RAM_REFRESH_PRE;
         end
-      end*/
+      end
     end
     
     RAM_REFRESH_PRE: begin
@@ -2164,12 +2151,9 @@ always @(posedge z_sample_clk) begin
     
     RAM_BLIT_COPY_READ: begin // 14
       if (data_out_ready) begin
-        //if (blitter_copy_counter<BLITTER_COPY_SIZE) begin
         // FIXME prevent wrap  
         blitter_copy_counter <= blitter_copy_counter + 1;
-        //end
-        // error is either here...
-        blitter_copy_rgb[blitter_copy_counter] <= ram_data_out; // questionable
+        blitter_copy_rgb[blitter_copy_counter] <= ram_data_out;
       end
 
       if (blitter_reads_issued>0 && blitter_copy_counter >= blitter_reads_issued) begin
@@ -2235,23 +2219,6 @@ always @(posedge z_sample_clk) begin
           // done
           blitter_enable <= 0;
           ram_arbiter_state <= RAM_WRITE_END1;
-
-          // CHECKME
-          /*$display("============ BLIT: ",blitter_x1+1);
-          if (blitter_x1<30) begin
-            blitter_enable <= 2;
-            blitter_x1 <= blitter_x1+3;
-            blitter_x2 <= blitter_x2+3;
-            blitter_x3 <= blitter_x3+3;
-            blitter_x4 <= blitter_x4+3;
-            blitter_curx <= blitter_x1+3;
-            blitter_curx2 <= blitter_x3+3;
-            blitter_cury <= blitter_y1;
-            blitter_cury2 <= blitter_y3;
-            blitter_ptr <= 64*640;
-            blitter_ptr2 <= 64*640;
-          end else
-            blitter_enable <= 0;*/
         end else if (blitter_copy_write_done && blitter_diry == 0) begin
           // next row
           blitter_curx <= blitter_x1;
@@ -2388,7 +2355,7 @@ always @(posedge vga_clk) begin
   vga_reset <= dvid_reset;
 end
 
-reg [8:0] counter_scanout = 0; // CHECKME was 9:0
+reg [8:0] counter_scanout = 0; // CHECKME
 reg [3:0] counter_repeat = 0;
 reg [3:0] counter_repeat_delayed = 0;
 reg [1:0] counter_scanout_words = 1;
@@ -2453,7 +2420,7 @@ always @(posedge vga_clk) begin
     counter_scanout_words <= 1;
 
   if (!vga_reset &&
-      ((counter_y < vga_screen_h) /*|| ((counter_x > vga_h_max) && counter_y>vga_v_max)*/)) begin
+      (counter_y < vga_screen_h)) begin
     if ((counter_x < vga_h_rez-1) || ((counter_x > vga_h_max) && counter_y!=vga_screen_h-1)) begin
       if (counter_repeat == max_repeat) begin
         counter_repeat <= 0;
@@ -2524,11 +2491,11 @@ always @(posedge vga_clk) begin
     green_p <= rgb[7:0];
     red_p  <= rgb[15:8];
     
-  end else if (vga_colormode==3) begin
+  /*end else if (vga_colormode==3) begin
     // monochrome 1-bit
     blue_p  <= rgb[~counter_repeat_delayed]?pal1r:pal0r;
     green_p <= rgb[~counter_repeat_delayed]?pal1g:pal0g;
-    red_p   <= rgb[~counter_repeat_delayed]?pal1b:pal0b;
+    red_p   <= rgb[~counter_repeat_delayed]?pal1b:pal0b;*/
   end else begin
     red_p   <= 0;
     green_p <= 0;
