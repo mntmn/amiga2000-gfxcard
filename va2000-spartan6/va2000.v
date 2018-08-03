@@ -102,15 +102,18 @@ reg clk_reset=0;
 reg [1:0] vga_clk_sel = 0;
 reg [1:0] vga_clk_sel0_latch = 0;
 
+//`define ZORRO2
+`define ZORRO3
+//`define PIXCLK_100
+
 `ifndef SIMULATION
 // pixel clock selector
-// 00 == 75mhz
+// 00 == 75mhz or 100mhz
 // 01 == 40mhz
-// 11 == 100mhz
 // #(.CLK_SEL_TYPE("ASYNC"))
 
 BUFGMUX vga_clk_mux2(
-  .O(vga_clk), 
+  .O(vga_clk),
   .I0(clk75_unbuffered),
   .I1(clk40_unbuffered),
   .S(vga_clk_sel0_latch[1])
@@ -607,8 +610,14 @@ clk_wiz_v3_6 DCM(
   .CLK_OUT1(z_sample_clk),
   .CLK_OUT2(sd_clk),
   
-  .CLK_OUT3(clk75_unbuffered),
-  .CLK_OUT4(clk40_unbuffered)
+  .CLK_OUT4(clk40_unbuffered),
+                 
+`ifdef PIXCLK_100
+  .CLK_OUT5(clk75_unbuffered) // 100mhz
+`endif
+`ifndef PIXCLK_100                 
+  .CLK_OUT3(clk75_unbuffered)
+`endif
 );
 
 DCM_SP #(
@@ -1017,7 +1026,7 @@ always @(posedge z_sample_clk) begin
       row_pitch    <= 1024;
       
       //safe_x1 <= 'h1ff;
-      safe_x2 <= 'h0; // FIXME
+      safe_x2 <= 'h1e0;
       fetch_preroll <= 'h1e0;
       ram_fetch_delay2_max <= 'h0;
       
@@ -1090,16 +1099,20 @@ always @(posedge z_sample_clk) begin
     
     DECIDE_Z2_Z3: begin
       // poor man's z3sense
-      /*if (zaddr_autoconfig) begin
+      `ifdef ZORRO2
+      if (zaddr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 0;
         zorro_state <= Z2_CONFIGURING;
-      end else*/
+      end
+      `endif
+      `ifdef ZORRO3
       if (z3addr_autoconfig) begin
         sd_reset <= 0;
         ZORRO3 <= 1;
         zorro_state <= Z3_CONFIGURING;
       end
+      `endif
     end
     
     Z3_CONFIGURING: begin
@@ -1206,7 +1219,7 @@ always @(posedge z_sample_clk) begin
           
           case (zaddr_sync2[7:0])
             8'h00: data <= 'b1101_1111_1111_1111; // zorro 2 (11), no pool (0) rom (1)
-            8'h02: data <= 'b0111_1111_1111_1111; // next board unrelated (0), 4mb
+            8'h02: data <= 'b0111_1111_1111_1111; // next board unrelated (0), 4mb (110 for 2mb)
             
             8'h04: data <= 'b1111_1111_1111_1111; // product number
             8'h06: data <= 'b1110_1111_1111_1111; // (1)
@@ -2313,8 +2326,8 @@ reg display_pixels = 0;
 
 reg vga_scalemode_h = 0;
 reg vga_scalemode_v = 0;
-reg[1:0] vga_colormode = 0;
-reg[4:0] vga_margin_x = 0;
+reg [2:0] vga_colormode = 0;
+reg [4:0] vga_margin_x = 0;
 
 reg[11:0] vga_h_max = 0;
 reg[11:0] vga_v_max = 0;
@@ -2406,8 +2419,6 @@ always @(posedge vga_clk) begin
       max_repeat <= 3;
     else
       max_repeat <= 1;
-  else if (vga_colormode==3)
-    max_repeat <= 15;
   else
     if (vga_scalemode_h==1)
       max_repeat <= 1;
@@ -2480,7 +2491,7 @@ always @(posedge vga_clk) begin
       blue_p  <= palette_b[rgb[15:8]];
     end
   end else if (vga_colormode==1) begin
-    // decode 16 to 24 bit color
+    // decode 16 to 24 bit color (r5g6b5)
     red_p   <= {rgb[4:0],  rgb[4:2]};
     green_p <= {rgb[10:5], rgb[10:9]};
     blue_p  <= {rgb[15:11],rgb[15:13]};
@@ -2490,6 +2501,18 @@ always @(posedge vga_clk) begin
     blue_p   <= rgb2[15:8];
     green_p <= rgb[7:0];
     red_p  <= rgb[15:8];
+    
+  end else if (vga_colormode==4) begin
+    // decode 15 to 24 bit color (0r5g5b5)
+    red_p   <= {rgb[4:0],  rgb[4:2]};
+    green_p <= {rgb[9:5],  rgb[9:7]};
+    blue_p  <= {rgb[14:10],rgb[14:12]};
+  end else if (vga_colormode==5) begin
+    // decode 15 to 24 bit color (r5g5b50)
+    red_p   <= {rgb[5:1],  rgb[5:3]};
+    green_p <= {rgb[10:6], rgb[10:8]};
+    blue_p  <= {rgb[15:11],rgb[15:13]};
+    
     
   /*end else if (vga_colormode==3) begin
     // monochrome 1-bit
