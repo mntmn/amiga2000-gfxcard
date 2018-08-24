@@ -211,7 +211,7 @@ int InitCard(__reg("a0") struct RTGBoard* b) {
   b->controller_type = 3;
 
   b->flags = (1<<20)|(1<<12)|(1<<26); // indisplaychain, flickerfixer, directaccess
-  b->color_formats = RTG_COLOR_FORMAT_CLUT|RTG_COLOR_FORMAT_RGB565|RTG_COLOR_FORMAT_RGB555|RTG_COLOR_FORMAT_RGB888;
+  b->color_formats = 1|2|512|1024|2048;
   b->sprite_flags = 0;
   b->bits_per_channel = 8;
 
@@ -376,20 +376,26 @@ uint16 calc_pitch_bytes(uint16 w, uint16 colormode) {
   if (colormode == MNTVA_COLOR_1BIT) {
     // monochrome, 16 pixels per word
     pitch = w>>3;
+  } else if (colormode == MNTVA_COLOR_15BIT) {
+    pitch = w<<1;
   } else {
-    pitch = pitch<<colormode;
+    pitch = w<<colormode;
   }
   return pitch;
 }
 
 uint16 rtg_to_mnt_colormode(uint16 format) {
   if (format==RTG_COLOR_FORMAT_CLUT) {
+    // format == 1
     return MNTVA_COLOR_8BIT;
-  } else if (format==9) {
+  } else if (format==9 || format==8) {
     return MNTVA_COLOR_32BIT;
   } else if (format==0) {
     return MNTVA_COLOR_1BIT;
+  } else if (format==0xb || format==0xd || format==5) {
+    return MNTVA_COLOR_15BIT;
   }
+  // format == 10
   return MNTVA_COLOR_16BIT565;
 }
 
@@ -486,15 +492,22 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
 
   vsync_wait(b);
 
+  //KPrintF("init_mode cf:\n");
+  //KPrintF("%lx\n",b->color_format);
+
   colormode = rtg_to_mnt_colormode(b->color_format);
 
-  registers->safe_x2 = 0;
+  registers->safe_x2 = 0x1e0;
   
-  if (colormode == MNTVA_COLOR_32BIT && m->width>=1280) {
+  if (colormode == MNTVA_COLOR_32BIT && m->width>=1024) {
+    registers->safe_x2 = 0x180;
     registers->fetch_preroll = 0x180;
-    /*} else if (colormode == MNTVA_COLOR_1BIT) {
-    registers->safe_x2 = 0x3e0;
-    registers->fetch_preroll = 0x3f5;*/
+  } else if (colormode == MNTVA_COLOR_16BIT565 && m->width==1280 || colormode == MNTVA_COLOR_15BIT && m->width==1280) {
+    registers->safe_x2 = 0x1d0;
+    registers->fetch_preroll = 0x1d0;
+  } else if (colormode == MNTVA_COLOR_8BIT && m->width==800) {
+    registers->safe_x2 = 0x1f0;
+    registers->fetch_preroll = 0x1f0;
   } else {
     registers->fetch_preroll = 0x1e0;
   }
@@ -656,7 +669,7 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
     if (w==0) return;
     w--;
     h--;
-  } else if (color_format==9) {
+  } else if (color_format==9 || color_format==8) {
     // true color
     x<<=1;
     w<<=1;
@@ -791,13 +804,15 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
     if (w<1) return; // FIXME fallback threshold
     w--;
     h--;
-  } else if (color_format==9) {
+  } else if (color_format==9 || color_format==8) {
+    // 32 bit
     x*=2;
     dx*=2;
     w*=2;
     w--;
     h--;
   } else {
+    // 16 bit
     w--;
     h--;
   }
