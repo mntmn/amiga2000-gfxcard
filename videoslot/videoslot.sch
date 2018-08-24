@@ -1,16 +1,15 @@
 EESchema Schematic File Version 2
-LIBS:videoslot-rescue
 LIBS:power
 LIBS:device
 LIBS:transistors
 LIBS:conn
 LIBS:linear
+LIBS:xilinx
 LIBS:regul
 LIBS:74xx
 LIBS:cmos4000
 LIBS:adc-dac
 LIBS:memory
-LIBS:xilinx
 LIBS:microcontrollers
 LIBS:dsp
 LIBS:microchip
@@ -32,7 +31,6 @@ LIBS:valves
 LIBS:mntamiga
 LIBS:voltrans
 LIBS:74lvc8t245
-LIBS:videoslot-cache
 EELAYER 25 0
 EELAYER END
 $Descr A4 11693 8268
