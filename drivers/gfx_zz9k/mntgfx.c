@@ -32,6 +32,7 @@
 
 #include <proto/exec.h>
 #include <proto/expansion.h>
+#include <proto/dos.h>
 
 #include <exec/types.h>
 #include <exec/memory.h>
@@ -308,12 +309,24 @@ void memory_alloc(__reg("a0") struct RTGBoard* b,__reg("d0")  uint32 len,__reg("
 void waitclick() {
 #define CIAAPRA ((volatile uint8*)0xbfe001)
   // bfe001 http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node012E.html
-  while ((*CIAAPRA & (1<<6))) {
+  while (!(*CIAAPRA & (1<<6))) {
     // wait for left mouse button pressed
   }
-  while (!(*CIAAPRA & (1<<6))) {
+  while ((*CIAAPRA & (1<<6))) {
     // wait for left mouse button released
   }
+}
+
+void zzwrite16(MNTVARegs* regbase, u16* reg, u16 value) {
+  struct ExecBase *SysBase = *(struct ExecBase **)4L;
+  Disable();
+  volatile u16* busy = (volatile u16*)((uint32)regbase+0x1000);
+  while (*busy) {
+  }
+  *reg = value;
+  while (*busy) {
+  }
+  Enable();
 }
 
 void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint16 w,__reg("d1")  int16 x,__reg("d2")  int16 y,__reg("d7")  uint16 format) {
@@ -323,13 +336,13 @@ void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint
   uint32 offhi = (offset&0xffff0000)>>16;
   uint32 offlo = offset&0xfc00;
 
-  registers->pan_ptr_hi = offhi;
-  registers->pan_ptr_lo = offlo;
+  zzwrite16(registers, &registers->pan_ptr_hi, offhi);
+  zzwrite16(registers, &registers->pan_ptr_lo, offlo);
   
   // video control op: vsync
   *(u16*)((uint32)registers+0x1000) = 0;
   *(u16*)((uint32)registers+0x1002) = 1;
-  for (int i=0; i<100; i++) {
+  for (int i=0; i<10000; i++) {
     *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
   }
   *(u16*)((uint32)registers+0x1002) = 0;
@@ -396,11 +409,11 @@ uint16 get_pitch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 width,__reg(
 }
 
 void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
-
   int hmax,vmax,hstart,hend,vstart,vend;
+  uint16 mode = 0;
   
   if (w==1280 && h==720) {
-    registers->mode = 0;
+    mode = 0;
     hmax=1980;
     vmax=750;
     hstart=1720;
@@ -408,7 +421,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     vstart=725;
     vend=730;
   } else if (w==800) {
-    registers->mode = 1;
+    mode=1;
     hmax=1056;
     vmax=628;
     hstart=840;
@@ -416,7 +429,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     vstart=601;
     vend=605;
   } else if (w==640) {
-    registers->mode = 2;
+    mode = 2;
     // 25.17 640 656 752 800 480 490 492 525
     hmax=800;
     vmax=525;
@@ -425,7 +438,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     vstart=490;
     vend=492;
   } else if (w==1024) {
-    registers->mode = 3;
+    mode = 3;
     hmax=1344;
     vmax=806;
     hstart=1048;
@@ -434,7 +447,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     vend=777;
   } else if (w==1280 && h==1024) {
     // 108.00 1280 1328 1440 1688 1024 1025 1028 1066
-    registers->mode = 4;
+    mode = 4;
     hmax=1688;
     vmax=1066;
     hstart=1328;
@@ -444,7 +457,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
   } else if (w==1920 && h==1080) {
     // ModeLine "1920x1080" 148.50 1920 2448 2492 2640 1080 1084 1089 1125 +HSync +VSync
     // 148.35 1920 2008 2052 2200 1080 1084 1089 1125
-    registers->mode = 5;
+    mode = 5;
     hmax=2640;
     vmax=1125;
     hstart=2448;
@@ -452,6 +465,8 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     vstart=1084;
     vend=1089;
   }
+
+  zzwrite16(registers, &registers->mode, mode);
   
   *(u16*)((uint32)registers+0x1000) = vmax;
   *(u16*)((uint32)registers+0x1002) = hmax;
@@ -462,11 +477,17 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
   *(u16*)((uint32)registers+0x1002) = hend;
   *(u16*)((uint32)registers+0x1004) = 7; // OP_HS
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
-  
+
   *(u16*)((uint32)registers+0x1000) = vstart;
   *(u16*)((uint32)registers+0x1002) = vend;
-  *(u16*)((uint32)registers+0x1004) = 8; // OP_HS
+  *(u16*)((uint32)registers+0x1004) = 8; // OP_VS
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
+
+  for (volatile int i=0; i<100000; i++) {
+    // wait...
+  }
+  KPrintF("waited...\n");
+  //waitclick();
 }
 
 void init_mode_pitch(MNTVARegs* registers, uint16 w, uint16 colormode) {
@@ -502,15 +523,12 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
     h = 2*m->height;
     if (h<480) h=480;
   }
-
+  
   if (colormode==0) hdiv*=4;
   if (colormode==1) hdiv*=2;
 
-  //registers->colormode = colormode;
-  //registers->scalemode = scale; // vscale|hscale
-
-  registers->hdiv = hdiv;
-  registers->vdiv = vdiv;
+  zzwrite16(registers, &registers->hdiv, hdiv);
+  zzwrite16(registers, &registers->vdiv, vdiv);
   
   // video control op: scale
   *(u16*)((uint32)registers+0x1000) = 0;
@@ -541,11 +559,6 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   }
   *(u16*)((uint32)registers+0x1002) = 0;
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
-
-  
-  //registers->scalemode = (scale<<2) | scale; // vscale|hscale
-  //registers->screen_w = w;
-  //registers->screen_h = h;
 }
 
 void set_palette(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 idx,__reg("d1")  uint16 len) {
@@ -590,17 +603,18 @@ uint32 get_pixelclock_hz(__reg("a0") struct RTGBoard* b,__reg("a1")  struct Mode
 uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) {
   MNTVARegs* registers = b->registers;
   
-  /*if (state==0) {
+  if (state==0) {
     // capture amiga video to 16bit
-    registers->pan_ptr_hi = 0x1; // FIXME capture to where?
-    registers->pan_ptr_lo = 0xc200;
+    // FIXME capture to where?
+    zzwrite16(registers, &registers->pan_ptr_hi, 0x1);
+    zzwrite16(registers, &registers->pan_ptr_lo, 0xc200);
 
     int w = 640;
     int h = 480;
     int colormode = MNTVA_COLOR_32BIT;
     
-    registers->hdiv = 1;
-    registers->vdiv = 2;
+    zzwrite16(registers, &registers->hdiv, 1);
+    zzwrite16(registers, &registers->vdiv, 2);
   
     // video control op: scale
     *(u16*)((uint32)registers+0x1000) = 0;
@@ -626,7 +640,7 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     // video control op: vsync
     *(u16*)((uint32)registers+0x1000) = 0;
     *(u16*)((uint32)registers+0x1002) = 1;
-    for (int i=0; i<100; i++) {
+    for (int i=0; i<1000; i++) {
       *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
     }
     *(u16*)((uint32)registers+0x1002) = 0;
@@ -639,8 +653,8 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     *(u16*)((uint32)registers+0x1006) = 0; // capture mode
     
     b->scratch[SCR_CAPMODE] = 0;
-    //init_mode(b, b->mode_info, b->border);
-    }*/
+    init_mode(b, b->mode_info, b->border);
+  }
   
   return 1-state;
 }
@@ -660,8 +674,8 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   
   if (r) {
     offset = (r->memory-(b->memory));
-    registers->blitter_dst_hi = (offset&0xffff0000)>>16;
-    registers->blitter_dst_lo = offset&0xffff;
+    zzwrite16(registers, &registers->blitter_dst_hi, (offset&0xffff0000)>>16);
+    zzwrite16(registers, &registers->blitter_dst_lo, offset&0xffff);
     pitch = r->pitch;
     gfxmem = (uint8*)r->memory;
     color_format = r->color_format;
@@ -671,18 +685,15 @@ void rect_fill(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
 
   color_format = rtg_to_mnt_colormode(color_format);
 
-  registers->blitter_rgb_hi = color>>16;
-  registers->blitter_rgb_lo = color&0xffff;
-
-  registers->blitter_row_pitch = pitch>>2;
-  registers->blitter_colormode = color_format;
-
-  registers->blitter_x1 = x;
-  registers->blitter_y1 = y;
-  registers->blitter_x2 = x+w-1;
-  registers->blitter_y2 = y+h-1;
-
-  registers->blitter_op_fillrect = 1;
+  zzwrite16(registers, &registers->blitter_rgb_hi, color>>16);
+  zzwrite16(registers, &registers->blitter_rgb_lo, color&0xffff);
+  zzwrite16(registers, &registers->blitter_row_pitch, pitch>>2);
+  zzwrite16(registers, &registers->blitter_colormode, color_format);
+  zzwrite16(registers, &registers->blitter_x1, x);
+  zzwrite16(registers, &registers->blitter_y1, y);
+  zzwrite16(registers, &registers->blitter_x2, x+w-1);
+  zzwrite16(registers, &registers->blitter_y2, y+h-1);
+  zzwrite16(registers, &registers->blitter_op_fillrect, 1);
 }
 
 void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,__reg("d0")  uint16 x,__reg("d1")  uint16 y,__reg("d2")  uint16 dx,__reg("d3")  uint16 dy,__reg("d4")  uint16 w,__reg("d5")  uint16 h,__reg("d6")  uint8 m,__reg("d7")  uint16 format) {
@@ -704,25 +715,26 @@ void rect_copy(__reg("a0") struct RTGBoard* b,__reg("a1")  struct RenderInfo* r,
   
   color_format = rtg_to_mnt_colormode(color_format);
 
-  registers->blitter_y1 = dy;
-  registers->blitter_y2 = dy+h-1;
-  registers->blitter_y3 = y;
+  zzwrite16(registers, &registers->blitter_y1, dy);
+  zzwrite16(registers, &registers->blitter_y2, dy+h-1);
+  zzwrite16(registers, &registers->blitter_y3, y);
   
-  registers->blitter_x1 = dx;
-  registers->blitter_x2 = dx+w-1;
-  registers->blitter_x3 = x;
+  zzwrite16(registers, &registers->blitter_x1, dx);
+  zzwrite16(registers, &registers->blitter_x2, dx+w-1);
+  zzwrite16(registers, &registers->blitter_x3, x);
+
+  zzwrite16(registers, &registers->blitter_row_pitch, pitch>>2);
+  zzwrite16(registers, &registers->blitter_colormode, color_format);
   
-  registers->blitter_row_pitch = pitch>>2; // 1 long = 4 bytes
-  registers->blitter_colormode = color_format;
+  offset = (r->memory-(b->memory));
+  zzwrite16(registers, &registers->blitter_src_hi, (offset&0xffff0000)>>16);
+  zzwrite16(registers, &registers->blitter_src_lo, offset&0xffff);
 
   offset = (r->memory-(b->memory));
-  registers->blitter_src_hi = (offset&0xffff0000)>>16;
-  registers->blitter_src_lo = offset&0xffff;
-  offset = (r->memory-(b->memory));
-  registers->blitter_dst_hi = (offset&0xffff0000)>>16;
-  registers->blitter_dst_lo = offset&0xffff;
+  zzwrite16(registers, &registers->blitter_dst_hi, (offset&0xffff0000)>>16);
+  zzwrite16(registers, &registers->blitter_dst_lo, offset&0xffff);
 
-  registers->blitter_op_copyrect = 2;
+  zzwrite16(registers, &registers->blitter_op_copyrect, 2);
 }
 
 void blitter_wait(__reg("a0") struct RTGBoard* b) {
