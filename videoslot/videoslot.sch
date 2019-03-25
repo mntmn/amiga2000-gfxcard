@@ -1,37 +1,6 @@
-EESchema Schematic File Version 2
-LIBS:power
-LIBS:device
-LIBS:transistors
-LIBS:conn
-LIBS:linear
-LIBS:xilinx
-LIBS:regul
-LIBS:74xx
-LIBS:cmos4000
-LIBS:adc-dac
-LIBS:memory
-LIBS:microcontrollers
-LIBS:dsp
-LIBS:microchip
-LIBS:analog_switches
-LIBS:motorola
-LIBS:texas
-LIBS:intel
-LIBS:audio
-LIBS:interface
-LIBS:digital-audio
-LIBS:philips
-LIBS:display
-LIBS:cypress
-LIBS:siliconi
-LIBS:opto
-LIBS:atmel
-LIBS:contrib
-LIBS:valves
-LIBS:mntamiga
-LIBS:voltrans
-LIBS:74lvc8t245
-EELAYER 25 0
+EESchema Schematic File Version 4
+LIBS:videoslot-cache
+EELAYER 29 0
 EELAYER END
 $Descr A4 11693 8268
 encoding utf-8
@@ -46,7 +15,7 @@ Comment3 ""
 Comment4 ""
 $EndDescr
 $Comp
-L CN451-RESCUE-videoslot CN1
+L videoslot-rescue:CN451-RESCUE-videoslot CN1
 U 1 1 579D05C5
 P 4350 4550
 F 0 "CN1" H 5150 4400 60  0000 C CNN
@@ -57,7 +26,7 @@ F 3 "" H 5150 4500 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L CN452 CN2
+L videoslot-rescue:CN452 CN2
 U 1 1 579D07DC
 P 7400 4550
 F 0 "CN2" H 8350 4500 60  0000 C CNN
@@ -68,7 +37,7 @@ F 3 "" H 8200 4500 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L 74LVC8T245 U1
+L videoslot-rescue:74LVC8T245 U1
 U 1 1 579D1430
 P 3100 4200
 F 0 "U1" H 3100 3650 50  0000 C CNN
@@ -79,7 +48,7 @@ F 3 "" H 3100 4200 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L 74LVC8T245 U2
+L videoslot-rescue:74LVC8T245 U2
 U 1 1 579D17F7
 P 6350 3400
 F 0 "U2" H 6350 2850 50  0000 C CNN
@@ -90,7 +59,7 @@ F 3 "" H 6350 3400 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L C_Small C1
+L videoslot-rescue:C_Small C1
 U 1 1 579D32F5
 P 2800 3150
 F 0 "C1" H 2810 3220 50  0000 L CNN
@@ -101,7 +70,7 @@ F 3 "" H 2800 3150 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L C_Small C2
+L videoslot-rescue:C_Small C2
 U 1 1 579D33BE
 P 3600 3150
 F 0 "C2" H 3610 3220 50  0000 L CNN
@@ -112,7 +81,7 @@ F 3 "" H 3600 3150 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L C_Small C3
+L videoslot-rescue:C_Small C3
 U 1 1 579D340B
 P 6100 2450
 F 0 "C3" H 6110 2520 50  0000 L CNN
@@ -123,7 +92,7 @@ F 3 "" H 6100 2450 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L C_Small C4
+L videoslot-rescue:C_Small C4
 U 1 1 579D3462
 P 6650 2450
 F 0 "C4" H 6660 2520 50  0000 L CNN
@@ -134,7 +103,7 @@ F 3 "" H 6650 2450 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR01
+L videoslot-rescue:GND #PWR01
 U 1 1 579D3499
 P 6100 2350
 F 0 "#PWR01" H 6100 2100 50  0001 C CNN
@@ -145,7 +114,7 @@ F 3 "" H 6100 2350 60  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR02
+L videoslot-rescue:GND #PWR02
 U 1 1 579D34BF
 P 6650 2350
 F 0 "#PWR02" H 6650 2100 50  0001 C CNN
@@ -156,7 +125,7 @@ F 3 "" H 6650 2350 60  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR03
+L videoslot-rescue:GND #PWR03
 U 1 1 579D352D
 P 2800 3050
 F 0 "#PWR03" H 2800 2800 50  0001 C CNN
@@ -167,7 +136,7 @@ F 3 "" H 2800 3050 60  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR04
+L videoslot-rescue:GND #PWR04
 U 1 1 579D3553
 P 3600 3050
 F 0 "#PWR04" H 3600 2800 50  0001 C CNN
@@ -178,7 +147,7 @@ F 3 "" H 3600 3050 60  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR05
+L videoslot-rescue:GND #PWR05
 U 1 1 579D359D
 P 3750 4650
 F 0 "#PWR05" H 3750 4400 50  0001 C CNN
@@ -189,7 +158,7 @@ F 3 "" H 3750 4650 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR06
+L videoslot-rescue:GND #PWR06
 U 1 1 579D35C3
 P 2650 4800
 F 0 "#PWR06" H 2650 4550 50  0001 C CNN
@@ -200,7 +169,7 @@ F 3 "" H 2650 4800 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR07
+L videoslot-rescue:GND #PWR07
 U 1 1 579D360D
 P 6750 5150
 F 0 "#PWR07" H 6750 4900 50  0001 C CNN
@@ -211,7 +180,7 @@ F 3 "" H 6750 5150 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR08
+L videoslot-rescue:GND #PWR08
 U 1 1 579D3633
 P 5900 3900
 F 0 "#PWR08" H 5900 3650 50  0001 C CNN
@@ -222,7 +191,7 @@ F 3 "" H 5900 3900 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L CONN_02X18 P1
+L videoslot-rescue:CONN_02X18 P1
 U 1 1 58BC318E
 P 3800 1600
 F 0 "P1" V 3754 2527 50  0000 L CNN
@@ -261,7 +230,7 @@ HS
 Text Label 2500 4250 0    60   ~ 0
 VS
 $Comp
-L GND #PWR09
+L videoslot-rescue:GND #PWR09
 U 1 1 58BC4F1C
 P 3350 1350
 F 0 "#PWR09" H 3350 1100 50  0001 C CNN
@@ -272,7 +241,7 @@ F 3 "" H 3350 1350 50  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR010
+L videoslot-rescue:GND #PWR010
 U 1 1 58BC4F54
 P 4150 1350
 F 0 "#PWR010" H 4150 1100 50  0001 C CNN
@@ -283,7 +252,7 @@ F 3 "" H 4150 1350 50  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR011
+L videoslot-rescue:GND #PWR011
 U 1 1 58BC4F8C
 P 4150 1850
 F 0 "#PWR011" H 4150 1600 50  0001 C CNN
@@ -294,7 +263,7 @@ F 3 "" H 4150 1850 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L +5V #PWR012
+L videoslot-rescue:+5V #PWR012
 U 1 1 58BC54C4
 P 4650 1350
 F 0 "#PWR012" H 4650 1200 50  0001 C CNN
@@ -305,7 +274,7 @@ F 3 "" H 4650 1350 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +5V #PWR013
+L videoslot-rescue:+5V #PWR013
 U 1 1 58BC54F3
 P 4650 1850
 F 0 "#PWR013" H 4650 1700 50  0001 C CNN
@@ -316,7 +285,7 @@ F 3 "" H 4650 1850 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L GND #PWR014
+L videoslot-rescue:GND #PWR014
 U 1 1 58BC594B
 P 4350 5550
 F 0 "#PWR014" H 4350 5300 50  0001 C CNN
@@ -327,7 +296,7 @@ F 3 "" H 4350 5550 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L GND #PWR015
+L videoslot-rescue:GND #PWR015
 U 1 1 58BC597A
 P 4350 5150
 F 0 "#PWR015" H 4350 4900 50  0001 C CNN
@@ -338,7 +307,7 @@ F 3 "" H 4350 5150 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L GND #PWR016
+L videoslot-rescue:GND #PWR016
 U 1 1 58BC5ABD
 P 4350 5750
 F 0 "#PWR016" H 4350 5500 50  0001 C CNN
@@ -349,7 +318,7 @@ F 3 "" H 4350 5750 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L GND #PWR017
+L videoslot-rescue:GND #PWR017
 U 1 1 58BC5DD6
 P 7400 2600
 F 0 "#PWR017" H 7400 2350 50  0001 C CNN
@@ -360,7 +329,7 @@ F 3 "" H 7400 2600 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +3.3V #PWR018
+L videoslot-rescue:+3.3V #PWR018
 U 1 1 58BC5FFD
 P 2950 1350
 F 0 "#PWR018" H 2950 1200 50  0001 C CNN
@@ -371,7 +340,7 @@ F 3 "" H 2950 1350 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L +3.3V #PWR019
+L videoslot-rescue:+3.3V #PWR019
 U 1 1 58BC6023
 P 2950 1850
 F 0 "#PWR019" H 2950 1700 50  0001 C CNN
@@ -382,7 +351,7 @@ F 3 "" H 2950 1850 50  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L +3.3V #PWR020
+L videoslot-rescue:+3.3V #PWR020
 U 1 1 58BC619F
 P 5950 2550
 F 0 "#PWR020" H 5950 2400 50  0001 C CNN
@@ -393,7 +362,7 @@ F 3 "" H 5950 2550 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L +3.3V #PWR021
+L videoslot-rescue:+3.3V #PWR021
 U 1 1 58BC6512
 P 2550 3100
 F 0 "#PWR021" H 2550 2950 50  0001 C CNN
@@ -404,7 +373,7 @@ F 3 "" H 2550 3100 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L CONN_01X06 P2
+L videoslot-rescue:CONN_01X06 P2
 U 1 1 58BC6655
 P 6250 650
 F 0 "P2" V 6215 312 50  0000 R CNN
@@ -415,7 +384,7 @@ F 3 "" H 6250 650 50  0000 C CNN
 	0    -1   -1   0   
 $EndComp
 $Comp
-L CONN_02X06 P3
+L videoslot-rescue:CONN_02X06 P3
 U 1 1 58BC6734
 P 7450 1600
 F 0 "P3" V 7496 1262 50  0000 R CNN
@@ -426,7 +395,7 @@ F 3 "" H 7450 400 50  0000 C CNN
 	0    -1   -1   0   
 $EndComp
 $Comp
-L GND #PWR022
+L videoslot-rescue:GND #PWR022
 U 1 1 58BC7FAC
 P 6400 900
 F 0 "#PWR022" H 6400 650 50  0001 C CNN
@@ -437,7 +406,7 @@ F 3 "" H 6400 900 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR023
+L videoslot-rescue:GND #PWR023
 U 1 1 58BC80A4
 P 7600 1350
 F 0 "#PWR023" H 7600 1100 50  0001 C CNN
@@ -448,7 +417,7 @@ F 3 "" H 7600 1350 50  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR024
+L videoslot-rescue:GND #PWR024
 U 1 1 58BC80E4
 P 7600 1850
 F 0 "#PWR024" H 7600 1600 50  0001 C CNN
@@ -459,7 +428,7 @@ F 3 "" H 7600 1850 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L +3.3V #PWR025
+L videoslot-rescue:+3.3V #PWR025
 U 1 1 58BC810E
 P 6500 900
 F 0 "#PWR025" H 6500 750 50  0001 C CNN
@@ -470,7 +439,7 @@ F 3 "" H 6500 900 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +3.3V #PWR026
+L videoslot-rescue:+3.3V #PWR026
 U 1 1 58BC8143
 P 7700 1350
 F 0 "#PWR026" H 7700 1200 50  0001 C CNN
@@ -481,7 +450,7 @@ F 3 "" H 7700 1350 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +3.3V #PWR027
+L videoslot-rescue:+3.3V #PWR027
 U 1 1 58BC8178
 P 7700 1850
 F 0 "#PWR027" H 7700 1700 50  0001 C CNN
@@ -492,7 +461,7 @@ F 3 "" H 7700 1850 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +5V #PWR028
+L videoslot-rescue:+5V #PWR028
 U 1 1 58BC9DB5
 P 3650 3400
 F 0 "#PWR028" H 3650 3250 50  0001 C CNN
@@ -503,7 +472,7 @@ F 3 "" H 3650 3400 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L +5V #PWR029
+L videoslot-rescue:+5V #PWR029
 U 1 1 58BC9DEA
 P 6900 2700
 F 0 "#PWR029" H 6900 2550 50  0001 C CNN
@@ -514,7 +483,7 @@ F 3 "" H 6900 2700 50  0000 C CNN
 	0    1    1    0   
 $EndComp
 $Comp
-L GND #PWR030
+L videoslot-rescue:GND #PWR030
 U 1 1 58BDE7DB
 P 3750 1350
 F 0 "#PWR030" H 3750 1100 50  0001 C CNN
@@ -525,7 +494,7 @@ F 3 "" H 3750 1350 50  0000 C CNN
 	-1   0    0    1   
 $EndComp
 $Comp
-L GND #PWR031
+L videoslot-rescue:GND #PWR031
 U 1 1 58BDE86A
 P 3750 1850
 F 0 "#PWR031" H 3750 1600 50  0001 C CNN
@@ -536,7 +505,7 @@ F 3 "" H 3750 1850 50  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L GND #PWR032
+L videoslot-rescue:GND #PWR032
 U 1 1 58BDE8EE
 P 3350 1850
 F 0 "#PWR032" H 3350 1600 50  0001 C CNN
@@ -555,11 +524,11 @@ Wire Wire Line
 Wire Wire Line
 	3500 4150 4350 4150
 Wire Wire Line
-	3500 3550 4150 3550
+	3500 3550 3600 3550
 Wire Wire Line
 	3600 3650 3500 3650
 Wire Wire Line
-	3600 3250 3600 3650
+	3600 3250 3600 3400
 Connection ~ 3600 3550
 Wire Wire Line
 	4350 5650 3950 5650
@@ -620,11 +589,11 @@ Wire Wire Line
 Wire Wire Line
 	6750 5150 7400 5150
 Wire Wire Line
-	6750 3850 6750 5150
+	6750 3850 6750 3900
 Wire Wire Line
-	6750 2750 6750 2850
+	6750 2750 6750 2800
 Wire Wire Line
-	6850 2550 6850 2800
+	6850 2550 6850 2700
 Wire Wire Line
 	6850 2800 6750 2800
 Connection ~ 6750 2800
@@ -655,7 +624,7 @@ Wire Wire Line
 Wire Wire Line
 	2550 3100 2550 3550
 Wire Wire Line
-	2550 3550 2700 3550
+	2550 3550 2650 3550
 Wire Wire Line
 	5600 2950 5950 2950
 Wire Wire Line
@@ -679,11 +648,11 @@ Wire Wire Line
 Wire Wire Line
 	2700 3650 2650 3650
 Wire Wire Line
-	2650 3650 2650 4800
+	2650 3650 2650 4550
 Wire Wire Line
 	5900 3850 5950 3850
 Wire Wire Line
-	5900 2850 5900 3900
+	5900 2850 5900 3750
 Connection ~ 5900 3750
 Wire Wire Line
 	2700 4550 2650 4550
@@ -693,9 +662,9 @@ Wire Wire Line
 Wire Wire Line
 	3500 3750 3600 3750
 Wire Wire Line
-	3600 3750 3600 6150
+	3600 3750 3600 4650
 Wire Wire Line
-	3500 4650 3750 4650
+	3500 4650 3600 4650
 Connection ~ 3600 4650
 Wire Wire Line
 	3600 6150 4350 6150
@@ -787,7 +756,7 @@ Wire Wire Line
 Wire Wire Line
 	5250 2450 5250 3650
 Wire Wire Line
-	7400 2600 7400 3150
+	7400 2600 7400 2750
 Connection ~ 7400 2950
 Connection ~ 7400 2750
 Wire Wire Line
@@ -891,4 +860,34 @@ Wire Wire Line
 	4150 3550 4150 4850
 Wire Wire Line
 	4150 4850 4350 4850
+Wire Wire Line
+	3600 3550 4150 3550
+Wire Wire Line
+	3600 3550 3600 3650
+Wire Wire Line
+	6750 2800 6750 2850
+Wire Wire Line
+	5900 3750 5900 3850
+Wire Wire Line
+	2650 4550 2650 4650
+Wire Wire Line
+	3600 4650 3600 6150
+Wire Wire Line
+	3600 4650 3750 4650
+Wire Wire Line
+	6750 3900 6750 5150
+Wire Wire Line
+	5900 3850 5900 3900
+Wire Wire Line
+	2650 3550 2700 3550
+Wire Wire Line
+	7400 2950 7400 3150
+Wire Wire Line
+	7400 2750 7400 2950
+Wire Wire Line
+	2650 4650 2650 4800
+Wire Wire Line
+	6850 2700 6850 2800
+Wire Wire Line
+	3600 3400 3600 3550
 $EndSCHEMATC
