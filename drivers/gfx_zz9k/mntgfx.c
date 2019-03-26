@@ -165,6 +165,7 @@ ULONG ExtFuncLib(void)
 
 #define CX_ENABLED 1
 #define SCR_CAPMODE 0 // scratch variable 0
+#define VSYNC_DELAY 100
 
 int FindCard(__reg("a0") struct RTGBoard* b) {
   struct ConfigDev* cd = NULL;
@@ -176,8 +177,9 @@ int FindCard(__reg("a0") struct RTGBoard* b) {
     KPrintF("failed to open expansion.library!\n");
     return 0;
   }
-  
-  if ((cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x4)) || (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x3))) {
+
+  // FIXME remove 0x2
+  if ((cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x4)) || (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x3))|| (cd = (struct ConfigDev*)FindConfigDev(cd,0x6d6e,0x2))) {
     KPrintF("MNT ZZ9000 found.\n");
     b->memory = (uint8*)(cd->cd_BoardAddr)+0x10000;
     b->memory_size = cd->cd_BoardSize-0x10000;
@@ -189,12 +191,6 @@ int FindCard(__reg("a0") struct RTGBoard* b) {
     KPrintF("MNT ZZ9000 not found!\n");
     return 0;
   }
-
-  /*uint32_t base = 0x600000;
-  b->memory = (uint8*)(base)+0x10000;
-  b->memory_size = 0x400000;
-  b->registers = (uint8*)0x600000;
-  return 1;*/
 }
 
 int InitCard(__reg("a0") struct RTGBoard* b) {
@@ -342,7 +338,7 @@ void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint
   // video control op: vsync
   *(u16*)((uint32)registers+0x1000) = 0;
   *(u16*)((uint32)registers+0x1002) = 1;
-  for (int i=0; i<10000; i++) {
+  for (int i=0; i<VSYNC_DELAY; i++) {
     *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
   }
   *(u16*)((uint32)registers+0x1002) = 0;
@@ -411,6 +407,7 @@ uint16 get_pitch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 width,__reg(
 void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
   int hmax,vmax,hstart,hend,vstart,vend;
   uint16 mode = 0;
+  uint16 polarity = 0;
   
   if (w==1280 && h==720) {
     mode = 0;
@@ -428,7 +425,7 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     hend=968;
     vstart=601;
     vend=605;
-  } else if (w==640) {
+  } else if (w==640 && h==480) {
     mode = 2;
     // 25.17 640 656 752 800 480 490 492 525
     hmax=800;
@@ -464,6 +461,16 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
     hend=2492;
     vstart=1084;
     vend=1089;
+  } else if (w==720 && h==576) {
+    // ModeLine "720x576" 27.00 720 732 796 864 576 581 586 625 -HSync -VSync
+    mode = 6;
+    hmax=864;
+    vmax=625;
+    hstart=732;
+    hend=796;
+    vstart=581;
+    vend=586;
+    polarity=1;
   }
 
   zzwrite16(registers, &registers->mode, mode);
@@ -482,12 +489,16 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
   *(u16*)((uint32)registers+0x1002) = vend;
   *(u16*)((uint32)registers+0x1004) = 8; // OP_VS
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
+  
+  *(u16*)((uint32)registers+0x1000) = 0;
+  *(u16*)((uint32)registers+0x1002) = polarity;
+  *(u16*)((uint32)registers+0x1004) = 10; // OP_POLARITY
+  *(u16*)((uint32)registers+0x1004) = 0; // NOP
 
+  // FIXME
   for (volatile int i=0; i<100000; i++) {
     // wait...
   }
-  KPrintF("waited...\n");
-  //waitclick();
 }
 
 void init_mode_pitch(MNTVARegs* registers, uint16 w, uint16 colormode) {
@@ -554,7 +565,7 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   // video control op: vsync
   *(u16*)((uint32)registers+0x1000) = 0;
   *(u16*)((uint32)registers+0x1002) = 1;
-  for (int i=0; i<100; i++) {
+  for (int i=0; i<VSYNC_DELAY; i++) {
     *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
   }
   *(u16*)((uint32)registers+0x1002) = 0;
@@ -583,6 +594,7 @@ uint32 is_bitmap_compatible(__reg("a0") struct RTGBoard* b,__reg("d7")  uint16 f
 }
 
 uint32 map_address(__reg("a0") struct RTGBoard* b,__reg("a1")  uint32 addr) {
+  // align screen buffers
   if (addr>(uint32)b->memory && addr < (((uint32)b->memory) + b->memory_size)) {
     addr=addr&0xfffff000;
   }
@@ -606,11 +618,13 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
   if (state==0) {
     // capture amiga video to 16bit
     // FIXME capture to where?
-    zzwrite16(registers, &registers->pan_ptr_hi, 0x1);
-    zzwrite16(registers, &registers->pan_ptr_lo, 0xc200);
+    //zzwrite16(registers, &registers->pan_ptr_hi, 0xe1);
+    //zzwrite16(registers, &registers->pan_ptr_lo, 0xc200);
+    zzwrite16(registers, &registers->pan_ptr_hi, 0xe0);
+    zzwrite16(registers, &registers->pan_ptr_lo, 0x0000);
 
-    int w = 640;
-    int h = 480;
+    int w = 720;
+    int h = 576;
     int colormode = MNTVA_COLOR_32BIT;
     
     zzwrite16(registers, &registers->hdiv, 1);
@@ -618,7 +632,7 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
   
     // video control op: scale
     *(u16*)((uint32)registers+0x1000) = 0;
-    *(u16*)((uint32)registers+0x1002) = 2;
+    *(u16*)((uint32)registers+0x1002) = 2; // vertical doubling
     *(u16*)((uint32)registers+0x1004) = 4; // OP_SCALE
     *(u16*)((uint32)registers+0x1004) = 0; // NOP
   
@@ -640,7 +654,7 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     // video control op: vsync
     *(u16*)((uint32)registers+0x1000) = 0;
     *(u16*)((uint32)registers+0x1002) = 1;
-    for (int i=0; i<1000; i++) {
+    for (int i=0; i<VSYNC_DELAY; i++) {
       *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
     }
     *(u16*)((uint32)registers+0x1002) = 0;
