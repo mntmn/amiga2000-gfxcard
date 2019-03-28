@@ -325,6 +325,15 @@ void zzwrite16(MNTVARegs* regbase, u16* reg, u16 value) {
   Enable();
 }
 
+void fix_vsync(MNTVARegs* registers) {  
+  // video control op: vsync
+  *(u16*)((uint32)registers+0x1000) = 0;
+  *(u16*)((uint32)registers+0x1002) = 1;
+  *(u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
+  *(u16*)((uint32)registers+0x1004) = 0;
+  *(u16*)((uint32)registers+0x1002) = 0;
+}
+
 void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint16 w,__reg("d1")  int16 x,__reg("d2")  int16 y,__reg("d7")  uint16 format) {
   MNTVARegs* registers = b->registers;
 
@@ -335,14 +344,7 @@ void pan(__reg("a0") struct RTGBoard* b,__reg("a1") uint8* mem,__reg("d0")  uint
   zzwrite16(registers, &registers->pan_ptr_hi, offhi);
   zzwrite16(registers, &registers->pan_ptr_lo, offlo);
   
-  // video control op: vsync
-  *(u16*)((uint32)registers+0x1000) = 0;
-  *(u16*)((uint32)registers+0x1002) = 1;
-  for (int i=0; i<VSYNC_DELAY; i++) {
-    *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
-  }
-  *(u16*)((uint32)registers+0x1002) = 0;
-  *(u16*)((uint32)registers+0x1004) = 0; // NOP
+  fix_vsync(registers);
 }
 
 void set_memory_mode(__reg("a0") struct RTGBoard* b,__reg("d7")  uint16 format) {
@@ -498,9 +500,9 @@ void init_modeline(MNTVARegs* registers, uint16 w, uint16 h) {
   // FIXME
   for (volatile int i=0; i<100000; i++) {
     // wait...
+    fix_vsync(registers);
   }
 }
-
 void init_mode_pitch(MNTVARegs* registers, uint16 w, uint16 colormode) {
 }
 
@@ -546,9 +548,6 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   *(u16*)((uint32)registers+0x1002) = scale;
   *(u16*)((uint32)registers+0x1004) = 4; // OP_SCALE
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
-  
-  init_modeline(registers, w, h);
-  init_mode_pitch(registers, w, colormode);
 
   // video control op: dimensions
   *(u16*)((uint32)registers+0x1000) = h;
@@ -561,15 +560,8 @@ void init_mode(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* m,__
   *(u16*)((uint32)registers+0x1002) = colormode;
   *(u16*)((uint32)registers+0x1004) = 1; // OP_COLORMODE
   *(u16*)((uint32)registers+0x1004) = 0; // NOP
-  
-  // video control op: vsync
-  *(u16*)((uint32)registers+0x1000) = 0;
-  *(u16*)((uint32)registers+0x1002) = 1;
-  for (int i=0; i<VSYNC_DELAY; i++) {
-    *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
-  }
-  *(u16*)((uint32)registers+0x1002) = 0;
-  *(u16*)((uint32)registers+0x1004) = 0; // NOP
+
+  init_modeline(registers, w, h);
 }
 
 void set_palette(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 idx,__reg("d1")  uint16 len) {
@@ -598,7 +590,7 @@ uint32 map_address(__reg("a0") struct RTGBoard* b,__reg("a1")  uint32 addr) {
   if (addr>(uint32)b->memory && addr < (((uint32)b->memory) + b->memory_size)) {
     addr=addr&0xfffff000;
   }
-  return addr; // direct mapping
+  return addr;
 }
 
 uint32 get_pixelclock_index(__reg("a0") struct RTGBoard* b,__reg("a1")  struct ModeInfo* mode,__reg("d0")  int32 clock,__reg("d7")  uint16 format) {
@@ -635,10 +627,7 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     *(u16*)((uint32)registers+0x1002) = 2; // vertical doubling
     *(u16*)((uint32)registers+0x1004) = 4; // OP_SCALE
     *(u16*)((uint32)registers+0x1004) = 0; // NOP
-  
-    init_modeline(registers, w, h);
-    init_mode_pitch(registers, w, colormode);
-
+    
     // video control op: dimensions
     *(u16*)((uint32)registers+0x1000) = h;
     *(u16*)((uint32)registers+0x1002) = w;
@@ -650,18 +639,11 @@ uint32 monitor_switch(__reg("a0") struct RTGBoard* b,__reg("d0")  uint16 state) 
     *(u16*)((uint32)registers+0x1002) = colormode;
     *(u16*)((uint32)registers+0x1004) = 1; // OP_COLORMODE
     *(u16*)((uint32)registers+0x1004) = 0; // NOP
-  
-    // video control op: vsync
-    *(u16*)((uint32)registers+0x1000) = 0;
-    *(u16*)((uint32)registers+0x1002) = 1;
-    for (int i=0; i<VSYNC_DELAY; i++) {
-      *(volatile u16*)((uint32)registers+0x1004) = 5; // OP_VSYNC
-    }
-    *(u16*)((uint32)registers+0x1002) = 0;
-    *(u16*)((uint32)registers+0x1004) = 0; // NOP
     
     *(u16*)((uint32)registers+0x1006) = 1; // capture mode
     b->scratch[SCR_CAPMODE] = 1;
+  
+    init_modeline(registers, w, h);
   } else {
     // rtg mode
     *(u16*)((uint32)registers+0x1006) = 0; // capture mode
