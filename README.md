@@ -250,7 +250,7 @@ Special thanks to Mike Field, his SDRAM and HDMI sources saved me a lot of time:
 
 Amiga Hardware Manual: http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node0000.html
 
-KiCad Open Source Super Awesome EDA: http://kicad-pcb.org
+KiCad Open Source Super Awesome EDA: http://kicad.org
 
 Thanks to the CommodoreAmiga group on Facebook and thanks to Sebastian Hartmann, Adrian Kaiser, Daniel Zahn, Greta Melnik for inspiration and motivation. Thanks to Jeri Ellsworth for inspiring me to learn Verilog.
 
