@@ -63,7 +63,7 @@ So I fired up the open source circuit design tool KiCad and started some schemat
 
 ![68000 Read Cycle](pics/schematics-zorro.png)
 
-Source: http://courses.cs.tamu.edu/cpsc462/walker/Slides/68K_Timing_Diagrams.pdf
+Source: https://web.archive.org/web/20140513181907/http://courses.cs.tamu.edu/cpsc462/walker/Slides/68K_Timing_Diagrams.pdf
 
 I figured that I needed to connect most of these signals to the FPGA and then write another loop in Verilog that would interpret the Amiga's bus commands and act on them (store the data given on the bus in the RAM or return stuff from the RAM). 
 
